@@ -1,0 +1,8 @@
+{
+  "name": "carrotos-reviewer-studio",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Thai AI reviewer studio",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=20" }
+}

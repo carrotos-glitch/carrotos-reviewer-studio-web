@@ -1,0 +1,5 @@
+.env
+.env.*
+!.env.example
+.carrotos-server.pid
+node_modules/

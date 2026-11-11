@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: carrotos-reviewer-studio
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: OPENAI_MODEL
+        value: gpt-6-luna
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: APP_ACCESS_CODE
+        sync: false
