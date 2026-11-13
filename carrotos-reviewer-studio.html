@@ -27,7 +27,25 @@ const tabContents={shot:'<div class="result-head"><strong>🎥 ช็อตล�
 (() => {
   const byId = id => document.getElementById(id);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  let generated = null;
+  let isPreview = true;
+  let generated = {
+    script:[
+      {time:'0–5 วิ',title:'เปิดคลิป · Hook',line:'ร้านชาบูหมาล่าร้านนี้ หอมเครื่องเทศตั้งแต่เดินเข้ามาเลยค่ะ',screen_text:'หม่าล่าเข้มข้น'},
+      {time:'5–15 วิ',title:'แนะนำร้าน',line:'บรรยากาศกว้าง นั่งสบาย มีน้ำซุปหลายแบบให้เลือก',screen_text:'ร้านชาบูหมาล่า'},
+      {time:'15–30 วิ',title:'โชว์วัตถุดิบ',line:'มีเนื้อสไลซ์กับผักสด เลือกได้ตามชอบเลย',screen_text:'วัตถุดิบพรีเมียม'},
+      {time:'30–45 วิ',title:'ชิมคำแรก',line:'น้ำซุปเข้มข้น เผ็ดชากำลังดี เนื้อนุ่มอร่อยมาก',screen_text:'เผ็ดชา หอมเครื่องเทศ'},
+      {time:'45–60 วิ',title:'สรุปและชวนไปลอง',line:'ใครชอบหมาล่าชวนเพื่อนมาเลยค่ะ เซฟพิกัดไว้',screen_text:'ชวนเพื่อนมาอร่อย'}
+    ],
+    shot_list:[
+      {time:'0:00',description:'ถ่ายป้ายหน้าร้าน'},{time:'0:03',description:'เดินเข้าร้านให้เห็นบรรยากาศ'},{time:'0:06',description:'แพนโต๊ะและที่นั่ง'},{time:'0:09',description:'ถ่ายหม้อก่อนเสิร์ฟ'},{time:'0:12',description:'โคลสอัปน้ำซุปหมาล่า'},
+      {time:'0:15',description:'เก็บภาพน้ำซุปเดือดและไอน้ำ'},{time:'0:18',description:'ซูมเครื่องเทศในหม้อ'},{time:'0:21',description:'ถ่ายน้ำซุปอีกหนึ่งรส'},{time:'0:24',description:'ถ่ายเนื้อสไลซ์บนจาน'},{time:'0:27',description:'ซูมลายมันของเนื้อ'},
+      {time:'0:30',description:'ถ่ายผักสด'},{time:'0:33',description:'ถ่ายเมนูเสริม'},{time:'0:36',description:'จัดวัตถุดิบเต็มโต๊ะ'},{time:'0:39',description:'หย่อนเนื้อลงหม้อ'},{time:'0:42',description:'ถ่ายเนื้อต้มในซุป'},
+      {time:'0:45',description:'คีบเนื้อขึ้นจากหม้อ'},{time:'0:48',description:'จุ่มเนื้อในน้ำจิ้ม'},{time:'0:51',description:'ถ่ายชิมคำแรก'},{time:'0:55',description:'เก็บสีหน้าหลังชิม'},{time:'0:58',description:'ปิดด้วยภาพโต๊ะอาหาร'}
+    ],
+    caption:'ชาบูหมาล่ามื้อนี้ดีมาก 🥢 น้ำซุปหอมเข้มข้น เนื้อนุ่ม ผักสด ใครเป็นสายหมาล่าชวนเพื่อนไปลองกันนะคะ 💛',
+    hashtags:['#รีวิวชาบู','#หม่าล่า','#ร้านอร่อยบอกต่อ','#สายกินห้ามพลาด','#รีวิวอาหาร','#ชาบูหมาล่า'],
+    cover_idea:'ภาพซูมหม้อหมาล่า พร้อมข้อความ “หม่าล่าเข้มข้น”'
+  };
   let activeTab = 'script';
   const dailyLimit = 25;
   const quotaKey = 'carrotos_daily_quota_v1';
@@ -65,7 +83,7 @@ const tabContents={shot:'<div class="result-head"><strong>🎥 ช็อตล�
     if (tab === 'script') {
       const script = Array.isArray(generated.script) ? generated.script : [];
       byId('scriptList').innerHTML = script.map(row => `<li><time>${esc(row.time)}</time><div><b>${esc(row.title)}</b><p style="margin:5px 0;color:#655a70"><strong>บทพูด:</strong> ${esc(row.line)}</p><span style="display:inline-block;background:#fff1d9;color:#8d5212;border-radius:8px;padding:5px 9px;font-weight:600">TEXT: ${esc(row.screen_text || '')}</span></div></li>`).join('');
-      document.querySelector('.result-head strong').textContent = `⭐ สคริปต์รีวิว (${byId('duration').value})`;
+      document.querySelector('.result-head strong').textContent = `${isPreview ? '⭐ ตัวอย่างสคริปต์' : '⭐ สคริปต์รีวิว'} (${byId('duration').value})`;
       return;
     }
     const panels = {
@@ -77,6 +95,7 @@ const tabContents={shot:'<div class="result-head"><strong>🎥 ช็อตล�
     byId('otherPanel').innerHTML = panels[tab] || '';
   }
   document.querySelectorAll('.tab').forEach(btn => btn.onclick = () => renderResult(btn.dataset.tab));
+  renderResult('script');
   const generate = async () => {
     if (readQuota() >= dailyLimit) { toast('วันนี้ใช้ครบ 25 ครั้งแล้ว กลับมาใหม่พรุ่งนี้นะ'); updateQuota(); return; }
     const button = byId('generate');
@@ -90,7 +109,7 @@ const tabContents={shot:'<div class="result-head"><strong>🎥 ช็อตล�
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || `ส่งคำขอไม่สำเร็จ (${response.status})`);
       localStorage.setItem(quotaKey, JSON.stringify({ day: quotaToday(), used: readQuota() + 1 }));
-      generated = data.result; renderResult(activeTab); toast('ได้คอนเทนต์จาก OpenAI แล้ว ✨');
+      generated = data.result; isPreview = false; renderResult(activeTab); toast('ได้คอนเทนต์จาก OpenAI แล้ว ✨');
       updateQuota();
     } catch (error) { toast(error.message || 'เชื่อมต่อ AI ไม่สำเร็จ'); }
     finally { button.disabled = false; button.textContent = '✨ สร้างคอนเทนต์ด้วย AI'; button.style.opacity = ''; }
