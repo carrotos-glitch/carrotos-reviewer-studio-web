@@ -33,21 +33,16 @@ const tabContents={shot:'<div class="result-head"><strong>🎥 ช็อตล�
   const quotaKey = 'carrotos_daily_quota_v1';
   const quotaToday = () => new Date().toLocaleDateString('en-CA');
   const readQuota = () => { try { const q = JSON.parse(localStorage.getItem(quotaKey) || '{}'); return q.day === quotaToday() ? Math.max(0, Number(q.used) || 0) : 0; } catch { return 0; } };
+  const quotaNotice = document.createElement('div');
+  quotaNotice.style.cssText = 'margin:-5px 0 13px;padding:10px 14px;border-radius:12px;background:#effbf0;color:#33854a;font-size:12px';
+  document.querySelector('.hero').after(quotaNotice);
   const updateQuota = () => {
     const left = Math.max(0, dailyLimit - readQuota());
-    notice.textContent = `ใช้ฟรี ไม่ต้องสมัคร · วันนี้เหลือ ${left}/${dailyLimit} ครั้ง`;
-    notice.style.background = left ? '#effbf0' : '#fff1f0';
-    notice.style.color = left ? '#33854a' : '#a33b35';
+    quotaNotice.textContent = `ใช้ฟรี ไม่ต้องสมัคร · วันนี้เหลือ ${left}/${dailyLimit} ครั้ง`;
+    quotaNotice.style.background = left ? '#effbf0' : '#fff1f0';
+    quotaNotice.style.color = left ? '#33854a' : '#a33b35';
   };
   const notice = document.createElement('div');
-  notice.id = 'apiNotice'; notice.style.cssText = 'margin:-5px 0 13px;padding:10px 14px;border-radius:12px;background:#fff5df;color:#78571b;font-size:12px';
-  notice.textContent = 'กำลังตรวจสอบการเชื่อมต่อ AI…'; document.querySelector('.hero').after(notice);
-  fetch('/api/status').then(r => r.json()).then(s => {
-    notice.style.background = s.configured ? '#effbf0' : '#fff5df';
-    notice.style.color = s.configured ? '#33854a' : '#78571b';
-    notice.innerHTML = s.configured ? `● เชื่อมต่อ OpenAI แล้ว · ${esc(s.model)}` : s.hosted ? 'OpenAI ยังไม่ได้ตั้งค่า · กรุณาแจ้งเจ้าของเว็บ' : 'ยังไม่ได้เชื่อมต่อ OpenAI · <a href="/settings" style="color:#68468c;font-weight:600">ตั้งค่า API key ที่นี่</a>';
-  }).catch(() => { notice.textContent = 'ต้องเปิดเว็บผ่านเซิร์ฟเวอร์ก่อน จึงจะเรียก OpenAI API ได้'; });
-
   byId('photos').addEventListener('change', async event => {
     const files = [...event.target.files];
     if (files.length > 4) { toast('แนบรูปได้ไม่เกิน 4 รูป'); event.target.value = ''; byId('photoPreview').innerHTML = ''; return; }
