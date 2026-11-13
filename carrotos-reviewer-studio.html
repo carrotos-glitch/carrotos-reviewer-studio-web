@@ -64,12 +64,12 @@ const tabContents={shot:'<div class="result-head"><strong>🎥 ช็อตล�
     byId('otherPanel').classList.toggle('hidden', tab === 'script');
     if (tab === 'script') {
       const script = Array.isArray(generated.script) ? generated.script : [];
-      byId('scriptList').innerHTML = script.map(row => `<li><time>${esc(row.time)}</time><div><b>${esc(row.title)}</b> ${esc(row.line)}</div></li>`).join('');
+      byId('scriptList').innerHTML = script.map(row => `<li><time>${esc(row.time)}</time><div><b>${esc(row.title)}</b><p style="margin:5px 0;color:#655a70"><strong>บทพูด:</strong> ${esc(row.line)}</p><span style="display:inline-block;background:#fff1d9;color:#8d5212;border-radius:8px;padding:5px 9px;font-weight:600">TEXT: ${esc(row.screen_text || '')}</span></div></li>`).join('');
       document.querySelector('.result-head strong').textContent = `⭐ สคริปต์รีวิว (${byId('duration').value})`;
       return;
     }
     const panels = {
-      shot: `<div class="result-head"><strong>🎥 ช็อตลิสต์แนะนำ</strong></div><ol class="script">${(generated.shot_list||[]).map((x,i)=>`<li><time>${i+1}</time><div>${esc(x)}</div></li>`).join('')}</ol>`,
+      shot: `<div class="result-head"><strong>🎥 ช็อตลิสต์ · ${(generated.shot_list||[]).length} ช็อต</strong></div><ol class="script">${(generated.shot_list||[]).map((x,i)=>`<li><time>${i+1}</time><div>${typeof x === 'string' ? esc(x) : `<b>${esc(x.time)}</b><p style="margin:5px 0;color:#655a70">${esc(x.description)}</p>`}</div></li>`).join('')}</ol>`,
       caption: `<div class="result-head"><strong>✍️ แคปชันพร้อมโพสต์</strong></div><p>${esc(generated.caption)}</p>`,
       hashtag: `<div class="result-head"><strong># แฮชแท็กแนะนำ</strong></div><p style="color:#73539b;line-height:2">${(generated.hashtags||[]).map(esc).join('　')}</p>`,
       cover: `<div class="result-head"><strong>🖼️ ไอเดียภาพปก</strong></div><p>${esc(generated.cover_idea)}</p>`
@@ -99,7 +99,7 @@ const tabContents={shot:'<div class="result-head"><strong>🎥 ช็อตล�
   byId('generate').onclick = generate; byId('regenBtn').onclick = generate;
   byId('copyBtn').onclick = async () => {
     if (!generated) { toast('กดสร้างคอนเทนต์ก่อนคัดลอก'); return; }
-    const text = activeTab === 'script' ? generated.script.map(row => `${row.time} ${row.title} ${row.line}`).join('\n') : activeTab === 'shot' ? (generated.shot_list||[]).join('\n') : activeTab === 'caption' ? generated.caption : activeTab === 'hashtag' ? (generated.hashtags||[]).join(' ') : generated.cover_idea;
+    const text = activeTab === 'script' ? generated.script.map(row => `${row.time} ${row.title}\nบทพูด: ${row.line}\nTEXT: ${row.screen_text || ''}`).join('\n\n') : activeTab === 'shot' ? (generated.shot_list||[]).map((x,i)=>typeof x==='string'?`${i+1}. ${x}`:`${i+1}. ${x.time} ${x.description}`).join('\n') : activeTab === 'caption' ? generated.caption : activeTab === 'hashtag' ? (generated.hashtags||[]).join(' ') : generated.cover_idea;
     try { await navigator.clipboard.writeText(text); toast('คัดลอกข้อความแล้ว'); } catch { toast('เบราว์เซอร์ไม่อนุญาตให้คัดลอก'); }
   };
 })();
