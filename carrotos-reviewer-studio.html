@@ -29,6 +29,16 @@ const tabContents={shot:'<div class="result-head"><strong>🎥 ช็อตล�
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   let generated = null;
   let activeTab = 'script';
+  const dailyLimit = 25;
+  const quotaKey = 'carrotos_daily_quota_v1';
+  const quotaToday = () => new Date().toLocaleDateString('en-CA');
+  const readQuota = () => { try { const q = JSON.parse(localStorage.getItem(quotaKey) || '{}'); return q.day === quotaToday() ? Math.max(0, Number(q.used) || 0) : 0; } catch { return 0; } };
+  const updateQuota = () => {
+    const left = Math.max(0, dailyLimit - readQuota());
+    notice.textContent = `ใช้ฟรี ไม่ต้องสมัคร · วันนี้เหลือ ${left}/${dailyLimit} ครั้ง`;
+    notice.style.background = left ? '#effbf0' : '#fff1f0';
+    notice.style.color = left ? '#33854a' : '#a33b35';
+  };
   const notice = document.createElement('div');
   notice.id = 'apiNotice'; notice.style.cssText = 'margin:-5px 0 13px;padding:10px 14px;border-radius:12px;background:#fff5df;color:#78571b;font-size:12px';
   notice.textContent = 'กำลังตรวจสอบการเชื่อมต่อ AI…'; document.querySelector('.hero').after(notice);
@@ -73,6 +83,7 @@ const tabContents={shot:'<div class="result-head"><strong>🎥 ช็อตล�
   }
   document.querySelectorAll('.tab').forEach(btn => btn.onclick = () => renderResult(btn.dataset.tab));
   const generate = async () => {
+    if (readQuota() >= dailyLimit) { toast('วันนี้ใช้ครบ 25 ครั้งแล้ว กลับมาใหม่พรุ่งนี้นะ'); updateQuota(); return; }
     const button = byId('generate');
     button.disabled = true; button.textContent = '⏳ กำลังให้ AI สร้างคอนเทนต์…'; button.style.opacity = '.75';
     try {
@@ -83,11 +94,13 @@ const tabContents={shot:'<div class="result-head"><strong>🎥 ช็อตล�
       }) });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || `ส่งคำขอไม่สำเร็จ (${response.status})`);
+      localStorage.setItem(quotaKey, JSON.stringify({ day: quotaToday(), used: readQuota() + 1 }));
       generated = data.result; renderResult(activeTab); toast('ได้คอนเทนต์จาก OpenAI แล้ว ✨');
-      notice.style.background='#effbf0'; notice.style.color='#33854a'; notice.textContent=`● สร้างคำตอบด้วย OpenAI · ${data.model}`;
+      updateQuota();
     } catch (error) { toast(error.message || 'เชื่อมต่อ AI ไม่สำเร็จ'); }
     finally { button.disabled = false; button.textContent = '✨ สร้างคอนเทนต์ด้วย AI'; button.style.opacity = ''; }
   };
+  updateQuota();
   byId('generate').onclick = generate; byId('regenBtn').onclick = generate;
   byId('copyBtn').onclick = async () => {
     if (!generated) { toast('กดสร้างคอนเทนต์ก่อนคัดลอก'); return; }

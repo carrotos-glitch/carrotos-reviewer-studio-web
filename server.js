@@ -1,49 +1,18 @@
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
-const { randomBytes, timingSafeEqual } = require('node:crypto');
 
 const PORT = Number(process.env.PORT || 4173);
 const HOSTED = process.env.NODE_ENV === 'production' || Boolean(process.env.RENDER);
 const HOST = process.env.HOST || (HOSTED ? '0.0.0.0' : '127.0.0.1');
 const MODEL = process.env.OPENAI_MODEL || 'gpt-6-luna';
 let API_KEY = process.env.OPENAI_API_KEY || '';
-const APP_ACCESS_CODE = process.env.APP_ACCESS_CODE || '';
 const PAGE = path.join(__dirname, 'carrotos-reviewer-studio.html');
 const MAX_BODY = 24 * 1024 * 1024;
 const requests = new Map();
-const sessions = new Map();
-const loginAttempts = new Map();
-
-function readSession(req) {
-  const cookie = req.headers.cookie || '';
-  const token = cookie.split(';').map(part => part.trim()).find(part => part.startsWith('carrotos_session='))?.slice('carrotos_session='.length);
-  const session = token && sessions.get(token);
-  if (!session || session.expiresAt < Date.now()) { if (token) sessions.delete(token); return null; }
-  return { token, ...session };
-}
 function readFile(res, file) {
   res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
   return fs.createReadStream(file).pipe(res);
-}
-async function login(req, res) {
-  if (!APP_ACCESS_CODE) return json(res, 503, { error: 'เว็บยังตั้งรหัสเข้าใช้งานไม่ครบ กรุณาติดต่อผู้ดูแลเว็บ' });
-  const ip = req.socket.remoteAddress || 'unknown';
-  const now = Date.now();
-  const attempts = (loginAttempts.get(ip) || []).filter(time => now - time < 60_000);
-  if (attempts.length >= 8) return json(res, 429, { error: 'ลองใส่รหัสหลายครั้งแล้ว กรุณารอสักครู่' });
-  try {
-    const body = await readBody(req);
-    const supplied = Buffer.from(typeof body.accessCode === 'string' ? body.accessCode : '');
-    const expected = Buffer.from(APP_ACCESS_CODE);
-    const valid = supplied.length === expected.length && timingSafeEqual(supplied, expected);
-    if (!valid) { attempts.push(now); loginAttempts.set(ip, attempts); return json(res, 401, { error: 'รหัสเข้าใช้งานไม่ถูกต้อง' }); }
-    loginAttempts.delete(ip);
-    const token = randomBytes(32).toString('hex');
-    sessions.set(token, { expiresAt: now + 24 * 60 * 60 * 1000 });
-    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'set-cookie': `carrotos_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400${HOSTED ? '; Secure' : ''}` });
-    return res.end(JSON.stringify({ ok: true }));
-  } catch (error) { return json(res, error.status || 400, { error: error.message || 'เข้าสู่ระบบไม่สำเร็จ' }); }
 }
 
 function json(res, status, data) {
@@ -73,7 +42,7 @@ const schema = { type: 'object', additionalProperties: false, required: ['script
 
 async function generate(req, res) {
   if (!API_KEY) return json(res, 503, { error: 'ยังไม่ได้ตั้งค่า OPENAI_API_KEY ที่เซิร์ฟเวอร์ กรุณาตั้งค่าตาม README-OpenAI.txt แล้วเปิดใหม่' });
-  const ip = HOSTED ? (readSession(req)?.token || 'anonymous') : (req.socket.remoteAddress || 'local');
+  const ip = req.socket.remoteAddress || 'unknown';
   const now = Date.now();
   const recent = (requests.get(ip) || []).filter(time => now - time < 60_000);
   if (recent.length >= 12) return json(res, 429, { error: 'ใช้งานถี่เกินไป กรุณารอสักครู่แล้วลองใหม่' });
@@ -129,13 +98,6 @@ async function configure(req, res) {
 
 http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-  if (req.method === 'POST' && url.pathname === '/api/login') return login(req, res);
-  const session = HOSTED ? readSession(req) : null;
-  if (HOSTED && !session) {
-    if (url.pathname.startsWith('/api/')) return json(res, 401, { error: 'กรุณาใส่รหัสเข้าใช้งานก่อน' });
-    return readFile(res, path.join(__dirname, 'login.html'));
-  }
-  if (HOSTED && !APP_ACCESS_CODE) return json(res, 503, { error: 'เว็บยังไม่ได้ตั้งค่า APP_ACCESS_CODE' });
   if (req.method === 'GET' && url.pathname === '/api/status') return json(res, 200, { configured: Boolean(API_KEY), model: MODEL, hosted: HOSTED });
   if (req.method === 'POST' && url.pathname === '/api/configure') return configure(req, res);
   if (req.method === 'POST' && url.pathname === '/api/generate') return generate(req, res);
