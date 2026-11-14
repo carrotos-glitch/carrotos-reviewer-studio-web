@@ -1,0 +1,20 @@
+CarrotOS PromptPay + EasySlip patch
+
+Files:
+- carrotos-reviewer-studio.html
+- server.js
+
+Before deploy:
+1) Replace the existing project files with these two files (keep the original copies as backup).
+2) In Render > your Web Service > Environment, add:
+   EASYSLIP_API_KEY = your EasySlip API v2 Bearer API key
+   PROMPTPAY_QR_IMAGE_URL = public HTTPS URL of your PromptPay QR image
+3) Keep DATABASE_URL configured for the existing PostgreSQL database.
+4) In EasySlip, register/verify the receiving PromptPay/bank account so matchAccount=true can match the receiver.
+5) Deploy and test with a small real payment before announcing the feature.
+
+Important:
+- Do not put EASYSLIP_API_KEY in HTML or frontend JavaScript.
+- The QR image URL must be publicly reachable over HTTPS. You can upload the QR image to the same GitHub repository and use its raw HTTPS URL.
+- This implementation checks the expected amount, registered recipient match, EasySlip duplicate flag, and unique transaction reference before adding credits.
+- This patch has passed JavaScript syntax checks only. It has not been tested against your live Render database, EasySlip account, or a real bank transfer.
