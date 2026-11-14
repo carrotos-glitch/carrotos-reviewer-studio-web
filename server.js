@@ -154,7 +154,7 @@ async function generate(req, res) {
     }
     const upstream = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST', headers: { authorization: `Bearer ${API_KEY}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ model: MODEL, store: false, max_output_tokens: 1800, input: [{ role: 'user', content }], text: { format: { type: 'json_schema', name: 'reviewer_content', strict: true, schema } } }),
+      body: JSON.stringify({ model: MODEL, store: false, max_output_tokens: 6000, input: [{ role: 'user', content }], text: { format: { type: 'json_schema', name: 'reviewer_content', strict: true, schema } } }),
       signal: AbortSignal.timeout(90_000)
     });
     const data = await upstream.json().catch(() => ({}));
