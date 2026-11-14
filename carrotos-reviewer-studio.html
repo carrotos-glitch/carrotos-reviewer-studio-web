@@ -34,10 +34,10 @@ const tabContents={shot:'<div class="result-head"><strong>🎥 ช็อตล�
   document.body.append(modal);
   const memberArea=modal.querySelector('#memberArea');
   function memberView(){
-    if(currentAccount?.member){const m=currentAccount.member;memberArea.innerHTML=`<p>เข้าสู่ระบบเป็น <b>${esc(m.email)}</b></p><div style="background:#f3edfb;border-radius:14px;padding:14px;margin:12px 0">เครดิตคงเหลือ <strong style="font-size:24px;color:#684496">${Number(m.credits)||0}</strong> ครั้ง</div><h3>เติมเครดิตด้วย PromptPay</h3><div style="display:grid;gap:9px"><button class="smallbtn buyPack" data-pack="small">ซื้อ 20 ครั้ง · 10 บาท</button><button class="smallbtn buyPack" data-pack="large">ซื้อ 100 ครั้ง · 39 บาท</button></div><p style="font-size:12px;color:#82758e">เครดิตจะเพิ่มหลังระบบรับชำระเงินยืนยันยอดแล้ว</p><button id="logoutMember" class="smallbtn">ออกจากระบบ</button>`;
+    if(currentAccount?.member){const m=currentAccount.member;memberArea.innerHTML=`<p>เข้าสู่ระบบเป็น <b>${esc(m.email)}</b></p><div style="background:#f3edfb;border-radius:14px;padding:14px;margin:12px 0">เครดิตคงเหลือ <strong style="font-size:24px;color:#684496">${Number(m.credits)||0}</strong> ครั้ง</div><h3>เติมเครดิตด้วย PromptPay</h3><div style="display:grid;gap:9px"><button class="smallbtn buyPack" data-pack="small">ซื้อ 20 ครั้ง · 15 บาท</button><button class="smallbtn buyPack" data-pack="medium">ซื้อ 100 ครั้ง · 59 บาท</button><button class="smallbtn buyPack" data-pack="large">ซื้อ 300 ครั้ง · 145 บาท</button></div><p style="font-size:12px;color:#82758e">เครดิตจะเพิ่มหลังระบบรับชำระเงินยืนยันยอดแล้ว</p><button id="logoutMember" class="smallbtn">ออกจากระบบ</button>`;
       memberArea.querySelectorAll('.buyPack').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const r=await fetch('/api/checkout',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({pack:b.dataset.pack})}),d=await r.json();if(!r.ok)throw new Error(d.error||'เปิดหน้าชำระเงินไม่สำเร็จ');location.href=d.url;}catch(e){toast(e.message);b.disabled=false;}});
       memberArea.querySelector('#logoutMember').onclick=async()=>{await fetch('/api/logout',{method:'POST'});currentAccount=null;modal.classList.add('hidden');updateQuota();setLoginLabel();};
-    } else {memberArea.innerHTML=`<p style="color:#776d83">สร้างบัญชีเพื่อเก็บเครดิตและซื้อเพิ่ม</p><form id="memberForm"><label class="field">อีเมล<input name="email" type="email" autocomplete="email" required style="width:100%;padding:10px;border:1px solid #d9c9e5;border-radius:10px"></label><label class="field">รหัสผ่าน (อย่างน้อย 10 ตัว)<input name="password" type="password" autocomplete="current-password" minlength="10" required style="width:100%;padding:10px;border:1px solid #d9c9e5;border-radius:10px"></label><div style="display:flex;gap:8px"><button class="smallbtn" type="submit" data-mode="login">เข้าสู่ระบบ</button><button class="smallbtn" type="submit" data-mode="register">สมัครสมาชิก</button></div><p id="memberError" style="color:#b33;margin-bottom:0"></p></form>`;
+    } else {memberArea.innerHTML=`<p style="color:#776d83">สร้างบัญชีเพื่อเก็บเครดิตฟรี ซื้อเพิ่มได้ทุกเมื่อ</p><a href="/auth/google" class="smallbtn" style="display:block;text-align:center;text-decoration:none;margin-bottom:12px;border-color:#d9c9e5"><b style="color:#4285f4">G</b>　สมัครหรือเข้าสู่ระบบด้วย Google</a><div style="text-align:center;color:#93899b;font-size:12px;margin:6px">หรือใช้อีเมล</div><form id="memberForm"><label class="field">อีเมล<input name="email" type="email" autocomplete="email" required style="width:100%;padding:10px;border:1px solid #d9c9e5;border-radius:10px"></label><label class="field">รหัสผ่าน (อย่างน้อย 10 ตัว)<input name="password" type="password" autocomplete="current-password" minlength="10" required style="width:100%;padding:10px;border:1px solid #d9c9e5;border-radius:10px"></label><div style="display:flex;gap:8px"><button class="smallbtn" type="submit" data-mode="login">เข้าสู่ระบบ</button><button class="smallbtn" type="submit" data-mode="register">สมัครสมาชิก</button></div><p id="memberError" style="color:#b33;margin-bottom:0"></p></form>`;
       memberArea.querySelectorAll('button[type=submit]').forEach(button=>button.onclick=async event=>{event.preventDefault();const form=memberArea.querySelector('#memberForm');if(!form.reportValidity())return;const error=memberArea.querySelector('#memberError');button.disabled=true;error.textContent='กำลังดำเนินการ…';try{const r=await fetch(button.dataset.mode==='register'?'/api/register':'/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:form.email.value,password:form.password.value})}),d=await r.json();if(!r.ok)throw new Error(d.error||'ทำรายการไม่สำเร็จ');currentAccount={member:d.member,ledger:[]};memberView();updateQuota();setLoginLabel();}catch(e){error.textContent=e.message;button.disabled=false;}});
     }
   }
@@ -46,6 +46,7 @@ const tabContents={shot:'<div class="result-head"><strong>🎥 ช็อตล�
   async function refreshAccount(){try{const r=await fetch('/api/account');if(!r.ok)return;currentAccount=await r.json();setLoginLabel();updateQuota();}catch{}}
   refreshAccount();
   if(new URLSearchParams(location.search).get('payment')==='success'){toast('ได้รับการชำระเงินแล้ว กำลังตรวจสอบเครดิต');let n=0;const poll=setInterval(async()=>{await refreshAccount();if(currentAccount?.member||++n>12){clearInterval(poll);modal.classList.remove('hidden');memberView();}},3000);history.replaceState({},'',location.pathname);}
+  const authMessage=new URLSearchParams(location.search).get('auth');if(authMessage==='google-not-ready')toast('ระบบ Google ยังรอการตั้งค่าจากเจ้าของเว็บ');else if(authMessage==='google-failed')toast('เข้าสู่ระบบ Google ไม่สำเร็จ กรุณาลองใหม่');else if(new URLSearchParams(location.search).get('login')==='google'){refreshAccount().then(()=>{toast('เข้าสู่ระบบด้วย Google แล้ว');modal.classList.remove('hidden');memberView();});}
   let isPreview = true;
   let generated = {
     script:[
@@ -66,7 +67,7 @@ const tabContents={shot:'<div class="result-head"><strong>🎥 ช็อตล�
     cover_idea:'ภาพซูมหม้อหมาล่า พร้อมข้อความ “หม่าล่าเข้มข้น”'
   };
   let activeTab = 'script';
-  const dailyLimit = 25;
+  const dailyLimit = 15;
   const quotaKey = 'carrotos_daily_quota_v1';
   const quotaToday = () => new Date().toLocaleDateString('en-CA');
   const readQuota = () => { try { const q = JSON.parse(localStorage.getItem(quotaKey) || '{}'); return q.day === quotaToday() ? Math.max(0, Number(q.used) || 0) : 0; } catch { return 0; } };
@@ -117,7 +118,7 @@ const tabContents={shot:'<div class="result-head"><strong>🎥 ช็อตล�
   document.querySelectorAll('.tab').forEach(btn => btn.onclick = () => renderResult(btn.dataset.tab));
   renderResult('script');
   const generate = async () => {
-    if (!currentAccount?.member && readQuota() >= dailyLimit) { toast('วันนี้ใช้ครบ 25 ครั้งแล้ว สมัครสมาชิกเพื่อเติมเครดิตได้'); updateQuota(); return; }
+    if (!currentAccount?.member && readQuota() >= dailyLimit) { toast('วันนี้ใช้ครบ 15 ครั้งแล้ว สมัครสมาชิกเพื่อเติมเครดิตได้'); updateQuota(); return; }
     const button = byId('generate');
     button.disabled = true; button.textContent = '⏳ กำลังให้ AI สร้างคอนเทนต์…'; button.style.opacity = '.75';
     try {

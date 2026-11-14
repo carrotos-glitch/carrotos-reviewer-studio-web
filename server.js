@@ -13,13 +13,15 @@ const PAGE = path.join(__dirname, 'carrotos-reviewer-studio.html');
 const MAX_BODY = 24 * 1024 * 1024;
 const requests = new Map();
 const pool = process.env.DATABASE_URL ? new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false }, max: 5 }) : null;
-const freeDaily = 25;
-const packs = { small: { amount: 1000, credits: 20 }, large: { amount: 3900, credits: 100 } };
+const freeDaily = 15;
+const packs = { small: { amount: 1500, credits: 20 }, medium: { amount: 5900, credits: 100 }, large: { amount: 14500, credits: 300 } };
 let dbReady;
 async function ensureDb() {
   if (!pool) throw Object.assign(new Error('ระบบสมาชิกยังไม่พร้อม กรุณาตั้งค่า DATABASE_URL ใน Render'), { status: 503 });
   if (!dbReady) dbReady = pool.query(`
-    CREATE TABLE IF NOT EXISTS members (id BIGSERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, credits INTEGER NOT NULL DEFAULT 0 CHECK (credits >= 0), created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+    CREATE TABLE IF NOT EXISTS members (id BIGSERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT, google_sub TEXT UNIQUE, credits INTEGER NOT NULL DEFAULT 0 CHECK (credits >= 0), created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+    ALTER TABLE members ADD COLUMN IF NOT EXISTS google_sub TEXT UNIQUE;
+    ALTER TABLE members ALTER COLUMN password_hash DROP NOT NULL;
     CREATE TABLE IF NOT EXISTS member_sessions (token_hash TEXT PRIMARY KEY, member_id BIGINT NOT NULL REFERENCES members(id) ON DELETE CASCADE, expires_at TIMESTAMPTZ NOT NULL);
     CREATE TABLE IF NOT EXISTS credit_orders (id TEXT PRIMARY KEY, member_id BIGINT NOT NULL REFERENCES members(id), pack TEXT NOT NULL, credits INTEGER NOT NULL, amount INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending', checkout_id TEXT UNIQUE, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), paid_at TIMESTAMPTZ);
     CREATE TABLE IF NOT EXISTS credit_ledger (id BIGSERIAL PRIMARY KEY, member_id BIGINT NOT NULL REFERENCES members(id), delta INTEGER NOT NULL, reason TEXT NOT NULL, reference TEXT UNIQUE, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
@@ -36,7 +38,7 @@ async function currentMember(req, client = pool) {
   const result = await client.query('SELECT m.id, m.email, m.credits FROM member_sessions s JOIN members m ON m.id=s.member_id WHERE s.token_hash=$1 AND s.expires_at>now()', [hash(token)]);
   return result.rows[0] || null;
 }
-function sessionCookie(res, token, maxAge) { res.setHeader('Set-Cookie', `carrotos_session=${encodeURIComponent(token)}; Path=/; HttpOnly; ${HOSTED?'Secure; ':''}SameSite=Lax; Max-Age=${maxAge}`); }
+function sessionCookie(res, token, maxAge) { const current=res.getHeader('Set-Cookie'), next=`carrotos_session=${encodeURIComponent(token)}; Path=/; HttpOnly; ${HOSTED?'Secure; ':''}SameSite=Lax; Max-Age=${maxAge}`; res.setHeader('Set-Cookie',[...(Array.isArray(current)?current:current?[current]:[]),next]); }
 function passwordHash(password, salt = crypto.randomBytes(16).toString('hex')) { return new Promise((resolve, reject) => crypto.scrypt(password, salt, 64, (error, key) => error ? reject(error) : resolve(`${salt}:${key.toString('hex')}`))); }
 async function verifyPassword(password, saved) { const [salt, expected] = String(saved).split(':'); if (!salt || !expected) return false; const actual = await passwordHash(password, salt); const a = Buffer.from(actual.split(':')[1], 'hex'), b = Buffer.from(expected, 'hex'); return a.length === b.length && crypto.timingSafeEqual(a, b); }
 async function register(req, res) {
@@ -51,6 +53,23 @@ async function login(req,res) {
   await ensureDb(); const body=await readBody(req); const email=String(body.email||'').trim().toLowerCase(); const result=await pool.query('SELECT id,email,password_hash,credits FROM members WHERE email=$1',[email]);
   if (!result.rowCount || !await verifyPassword(String(body.password||''),result.rows[0].password_hash)) return json(res,401,{error:'อีเมลหรือรหัสผ่านไม่ถูกต้อง'});
   const m=result.rows[0], token=crypto.randomBytes(32).toString('base64url'); await pool.query('INSERT INTO member_sessions(token_hash,member_id,expires_at) VALUES($1,$2,now()+interval \'30 days\')',[hash(token),m.id]); sessionCookie(res,token,30*86400); delete m.password_hash; return json(res,200,{member:m});
+}
+function googleRedirectUri(){const origin=(process.env.APP_BASE_URL||'https://carrotos-reviewer-studio.onrender.com').replace(/\/$/,'');return `${origin}/auth/google/callback`;}
+async function googleStart(req,res){
+  if(!process.env.GOOGLE_CLIENT_ID||!process.env.GOOGLE_CLIENT_SECRET){res.writeHead(302,{Location:'/?auth=google-not-ready','Cache-Control':'no-store'});return res.end();}
+  const state=crypto.randomBytes(24).toString('base64url'), secure=HOSTED?'Secure; ':''; res.setHeader('Set-Cookie',`carrotos_oauth_state=${state}; Path=/; HttpOnly; ${secure}SameSite=Lax; Max-Age=600`);
+  const u=new URL('https://accounts.google.com/o/oauth2/v2/auth');u.searchParams.set('client_id',process.env.GOOGLE_CLIENT_ID);u.searchParams.set('redirect_uri',googleRedirectUri());u.searchParams.set('response_type','code');u.searchParams.set('scope','openid email profile');u.searchParams.set('state',state);u.searchParams.set('prompt','select_account');res.writeHead(302,{Location:u.toString(),'Cache-Control':'no-store'});res.end();
+}
+async function googleCallback(req,res){
+  await ensureDb();const url=new URL(req.url,`https://${req.headers.host||'localhost'}`),state=url.searchParams.get('state')||'',saved=cookie(req,'carrotos_oauth_state');res.setHeader('Set-Cookie',`carrotos_oauth_state=; Path=/; HttpOnly; ${HOSTED?'Secure; ':''}SameSite=Lax; Max-Age=0`);
+  if(!state||!saved||state!==saved||!url.searchParams.get('code')){res.writeHead(302,{Location:'/?auth=google-failed'});return res.end();}
+  const tokenResponse=await fetch('https://oauth2.googleapis.com/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({code:url.searchParams.get('code'),client_id:process.env.GOOGLE_CLIENT_ID||'',client_secret:process.env.GOOGLE_CLIENT_SECRET||'',redirect_uri:googleRedirectUri(),grant_type:'authorization_code'})});const tokens=await tokenResponse.json().catch(()=>({}));
+  if(!tokenResponse.ok||!tokens.access_token){res.writeHead(302,{Location:'/?auth=google-failed'});return res.end();}
+  const profileResponse=await fetch('https://www.googleapis.com/oauth2/v2/userinfo',{headers:{authorization:`Bearer ${tokens.access_token}`}}),profile=await profileResponse.json().catch(()=>({}));
+  if(!profileResponse.ok||!profile.id||!profile.email||profile.verified_email!==true){res.writeHead(302,{Location:'/?auth=google-failed'});return res.end();}
+  const result=await pool.query('INSERT INTO members(email,google_sub) VALUES($1,$2) ON CONFLICT(email) DO UPDATE SET google_sub=EXCLUDED.google_sub WHERE members.google_sub IS NULL OR members.google_sub=EXCLUDED.google_sub RETURNING id,email,credits',[String(profile.email).toLowerCase(),String(profile.id)]);
+  if(!result.rowCount){res.writeHead(302,{Location:'/?auth=google-failed'});return res.end();}
+  const token=crypto.randomBytes(32).toString('base64url');await pool.query("INSERT INTO member_sessions(token_hash,member_id,expires_at) VALUES($1,$2,now()+interval '30 days')",[hash(token),result.rows[0].id]);sessionCookie(res,token,30*86400);res.writeHead(302,{Location:'/?login=google','Cache-Control':'no-store'});res.end();
 }
 async function createCheckout(req,res) {
   await ensureDb(); const member=await currentMember(req); if(!member)return json(res,401,{error:'กรุณาเข้าสู่ระบบก่อนซื้อเครดิต'});
@@ -177,6 +196,8 @@ async function configure(req, res) {
 
 http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  if (req.method === 'GET' && url.pathname === '/auth/google') return googleStart(req,res);
+  if (req.method === 'GET' && url.pathname === '/auth/google/callback') { try { return await googleCallback(req,res); } catch { res.writeHead(302,{Location:'/?auth=google-failed'}); return res.end(); } }
   if (req.method === 'POST' && url.pathname === '/api/stripe/webhook') return stripeWebhook(req,res);
   if (req.method === 'GET' && url.pathname === '/api/account') { try { return await account(req,res); } catch(e) { return json(res,e.status||500,{error:e.message||'โหลดบัญชีไม่สำเร็จ'}); } }
   if (req.method === 'POST' && url.pathname === '/api/register') { try { return await register(req,res); } catch(e) { return json(res,e.status||500,{error:e.code==='23505'?'อีเมลนี้มีบัญชีแล้ว':e.message||'สมัครสมาชิกไม่สำเร็จ'}); } }
