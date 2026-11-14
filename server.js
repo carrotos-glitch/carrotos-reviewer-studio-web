@@ -82,15 +82,19 @@ async function createCheckout(req,res) {
   if(!upstream.ok||!data.url){await pool.query("UPDATE credit_orders SET status='failed' WHERE id=$1",[id]); return json(res,502,{error:'สร้างรายการชำระเงินไม่สำเร็จ กรุณาลองใหม่'});}
   await pool.query('UPDATE credit_orders SET checkout_id=$2 WHERE id=$1',[id,data.id]); return json(res,200,{url:data.url});
 }
+function clientIp(req){const forwarded=String(req.headers['x-forwarded-for']||'').split(',').map(value=>value.trim()).filter(Boolean);const cloudflare=String(req.headers['cf-connecting-ip']||'').trim();return (cloudflare||forwarded[0]||req.socket.remoteAddress||'unknown').slice(0,128)}
+const bangkokDay="(now() AT TIME ZONE 'Asia/Bangkok')::date";
+function usageKey(req){return hash((process.env.APP_SESSION_SECRET||process.env.DATABASE_URL||'carrotos')+':'+clientIp(req))}
+async function guestUsage(key){const result=await pool.query('SELECT used FROM guest_usage WHERE day='+bangkokDay+' AND ip_hash=$1',[key]);const used=Number(result.rows[0]?.used||0);return{used,remaining:Math.max(0,freeDaily-used)}}
 async function reserveUse(req) {
   const member=await currentMember(req);
   if(member){const result=await pool.query('UPDATE members SET credits=credits-1 WHERE id=$1 AND credits>0 RETURNING id',[member.id]);return result.rowCount?{kind:'member',id:member.id}:null;}
-  const ip=req.socket.remoteAddress||'unknown', key=hash(`${process.env.APP_SESSION_SECRET||process.env.DATABASE_URL||'carrotos'}:${ip}`);
-  const result=await pool.query(`INSERT INTO guest_usage(day,ip_hash,used) VALUES(current_date,$1,1) ON CONFLICT(day,ip_hash) DO UPDATE SET used=guest_usage.used+1 WHERE guest_usage.used<$2 RETURNING used`,[key,freeDaily]);
+  const key=usageKey(req);
+  const result=await pool.query('INSERT INTO guest_usage(day,ip_hash,used) VALUES('+bangkokDay+',$1,1) ON CONFLICT(day,ip_hash) DO UPDATE SET used=guest_usage.used+1 WHERE guest_usage.used<$2 RETURNING used',[key,freeDaily]);
   return result.rowCount?{kind:'guest',key}:null;
 }
-async function consumeCredit(req,res){await ensureDb();const reservation=await reserveUse(req);if(!reservation)return json(res,402,{error:'โควต้าฟรีวันนี้หมดแล้ว หรือเครดิตสมาชิกไม่พอ'});if(reservation.kind==='member'){const result=await pool.query('SELECT credits FROM members WHERE id=$1',[reservation.id]);return json(res,200,{kind:'member',remaining:Number(result.rows[0]?.credits||0)})}const result=await pool.query('SELECT used FROM guest_usage WHERE day=current_date AND ip_hash=$1',[reservation.key]);return json(res,200,{kind:'guest',remaining:Math.max(0,freeDaily-Number(result.rows[0]?.used||0))})}async function refundUse(reservation){if(!reservation||!pool)return;if(reservation.kind==='member')await pool.query('UPDATE members SET credits=credits+1 WHERE id=$1',[reservation.id]);else await pool.query('UPDATE guest_usage SET used=GREATEST(0,used-1) WHERE day=current_date AND ip_hash=$1',[reservation.key]);}
-async function account(req,res){await ensureDb();const member=await currentMember(req);if(!member)return json(res,200,{member:null,guestLimit:freeDaily});const ledger=await pool.query('SELECT delta,reason,created_at FROM credit_ledger WHERE member_id=$1 ORDER BY id DESC LIMIT 10',[member.id]);return json(res,200,{member,ledger:ledger.rows});}
+async function consumeCredit(req,res){await ensureDb();const reservation=await reserveUse(req);if(!reservation)return json(res,402,{error:'โควต้าฟรี 15 ครั้งต่อวันนี้ถูกใช้ครบแล้ว หรือเครดิตสมาชิกไม่พอ'});if(reservation.kind==='member'){const result=await pool.query('SELECT credits FROM members WHERE id=$1',[reservation.id]);return json(res,200,{kind:'member',remaining:Number(result.rows[0]?.credits||0)})}const usage=await guestUsage(reservation.key);return json(res,200,{kind:'guest',remaining:usage.remaining,used:usage.used})}async function refundUse(reservation){if(!reservation||!pool)return;if(reservation.kind==='member')await pool.query('UPDATE members SET credits=credits+1 WHERE id=$1',[reservation.id]);else await pool.query('UPDATE guest_usage SET used=GREATEST(0,used-1) WHERE day='+bangkokDay+' AND ip_hash=$1',[reservation.key]);}
+async function account(req,res){await ensureDb();const member=await currentMember(req);const usage=await guestUsage(usageKey(req));if(!member)return json(res,200,{member:null,guestLimit:freeDaily,guestUsed:usage.used,guestRemaining:usage.remaining});const ledger=await pool.query('SELECT delta,reason,created_at FROM credit_ledger WHERE member_id=$1 ORDER BY id DESC LIMIT 10',[member.id]);return json(res,200,{member,ledger:ledger.rows,guestLimit:freeDaily,guestUsed:usage.used,guestRemaining:usage.remaining});}
 async function logout(req,res){if(pool){const token=cookie(req,'carrotos_session');if(token)await pool.query('DELETE FROM member_sessions WHERE token_hash=$1',[hash(token)]);}sessionCookie(res,'',0);return json(res,200,{ok:true});}
 async function stripeWebhook(req,res) {
   if(!pool||!process.env.STRIPE_WEBHOOK_SECRET)return json(res,503,{error:'Webhook ยังไม่ได้ตั้งค่า'});
@@ -141,7 +145,7 @@ const schema = { type: 'object', additionalProperties: false, required: ['script
 async function generate(req, res) {
   if (!API_KEY) return json(res, 503, { error: 'ยังไม่ได้ตั้งค่า OPENAI_API_KEY ที่เซิร์ฟเวอร์ กรุณาตั้งค่าตาม README-OpenAI.txt แล้วเปิดใหม่' });
   if (pool) await ensureDb();
-  const ip = req.socket.remoteAddress || 'unknown';
+  const ip = clientIp(req);
   const now = Date.now();
   const recent = (requests.get(ip) || []).filter(time => now - time < 60_000);
   if (recent.length >= 12) return json(res, 429, { error: 'ใช้งานถี่เกินไป กรุณารอสักครู่แล้วลองใหม่' });
@@ -171,7 +175,7 @@ async function generate(req, res) {
     }
     const outputText = data.output_text || data.output?.flatMap(item => item.content || []).find(part => part.type === 'output_text')?.text;
     if (!outputText) { await refundUse(reservation); reservation = null; return json(res, 502, { error: 'AI ไม่ได้ส่งข้อความกลับมา กรุณาลองใหม่' }); }
-    try { const result=JSON.parse(outputText); const member=pool?await currentMember(req):null; return json(res, 200, { result, model: data.model || MODEL, credits: member?.credits ?? null }); }
+    try { const result=JSON.parse(outputText); const member=pool?await currentMember(req):null; const usage=reservation?.kind==='guest'?await guestUsage(reservation.key):null; return json(res, 200, { result, model: data.model || MODEL, credits: member?.credits ?? null, guestRemaining: usage?.remaining ?? null }); }
     catch { await refundUse(reservation); reservation=null; return json(res, 502, { error: 'รูปแบบคำตอบจาก AI ไม่ถูกต้อง กรุณาลองใหม่' }); }
   } catch (error) {
     await refundUse(reservation).catch(() => {});

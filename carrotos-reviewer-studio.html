@@ -69,14 +69,15 @@ const tabContents={shot:'<div class="result-head"><strong>🎥 ช็อตล�
   let activeTab = 'script';
   const dailyLimit = 15;
   const quotaKey = 'carrotos_daily_quota_v1';
-  const quotaToday = () => new Date().toLocaleDateString('en-CA');
+  const quotaToday = () => new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Bangkok',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
   const readQuota = () => { try { const q = JSON.parse(localStorage.getItem(quotaKey) || '{}'); return q.day === quotaToday() ? Math.max(0, Number(q.used) || 0) : 0; } catch { return 0; } };
   const quotaNotice = document.createElement('div');
   quotaNotice.style.cssText = 'margin:-5px 0 13px;padding:10px 14px;border-radius:12px;background:#effbf0;color:#33854a;font-size:12px';
   document.querySelector('.hero').after(quotaNotice);
   const updateQuota = () => {
     if(currentAccount?.member){quotaNotice.textContent=`👤 ${currentAccount.member.email} · เครดิตคงเหลือ ${currentAccount.member.credits} ครั้ง`;quotaNotice.style.background='#f3edfb';quotaNotice.style.color='#604288';setLoginLabel();return;}
-    const left = Math.max(0, dailyLimit - readQuota());
+    const left = Number.isFinite(currentAccount?.guestRemaining) ? Math.max(0, Number(currentAccount.guestRemaining)) : Math.max(0, dailyLimit - readQuota());
+    if(Number.isFinite(currentAccount?.guestRemaining))localStorage.setItem(quotaKey,JSON.stringify({day:quotaToday(),used:dailyLimit-left}));
     quotaNotice.textContent = `ใช้ฟรี ไม่ต้องสมัคร · วันนี้เหลือ ${left}/${dailyLimit} ครั้ง · สมัครสมาชิกเพื่อเก็บเครดิต`;
     quotaNotice.style.background = left ? '#effbf0' : '#fff1f0';
     quotaNotice.style.color = left ? '#33854a' : '#a33b35';
@@ -118,7 +119,8 @@ const tabContents={shot:'<div class="result-head"><strong>🎥 ช็อตล�
   document.querySelectorAll('.tab').forEach(btn => btn.onclick = () => renderResult(btn.dataset.tab));
   renderResult('script');
   const generate = async () => {
-    if (!currentAccount?.member && readQuota() >= dailyLimit) { toast('วันนี้ใช้ครบ 15 ครั้งแล้ว สมัครสมาชิกเพื่อเติมเครดิตได้'); updateQuota(); return; }
+    const usedToday=Number.isFinite(currentAccount?.guestRemaining)?dailyLimit-Number(currentAccount.guestRemaining):readQuota();
+    if (!currentAccount?.member && usedToday >= dailyLimit) { toast('วันนี้ใช้ครบ 15 ครั้งแล้ว โควต้ารวมการสร้างรีวิวและ PDF'); updateQuota(); return; }
     const button = byId('generate');
     button.disabled = true; button.textContent = '⏳ กำลังให้ AI สร้างคอนเทนต์…'; button.style.opacity = '.75';
     try {
@@ -129,7 +131,7 @@ const tabContents={shot:'<div class="result-head"><strong>🎥 ช็อตล�
       }) });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || `ส่งคำขอไม่สำเร็จ (${response.status})`);
-      if(!currentAccount?.member)localStorage.setItem(quotaKey, JSON.stringify({ day: quotaToday(), used: readQuota() + 1 }));
+      if(!currentAccount?.member){const left=Number.isFinite(data.guestRemaining)?Math.max(0,Number(data.guestRemaining)):Math.max(0,dailyLimit-usedToday-1);currentAccount={...(currentAccount||{}),guestRemaining:left};localStorage.setItem(quotaKey,JSON.stringify({day:quotaToday(),used:dailyLimit-left}));}
       else {currentAccount.member.credits=Math.max(0,Number(currentAccount.member.credits)-1);setLoginLabel();}
       generated = data.result; isPreview = false; renderResult(activeTab); toast('ได้คอนเทนต์จาก OpenAI แล้ว ✨');
       updateQuota();
