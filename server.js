@@ -89,7 +89,7 @@ async function reserveUse(req) {
   const result=await pool.query(`INSERT INTO guest_usage(day,ip_hash,used) VALUES(current_date,$1,1) ON CONFLICT(day,ip_hash) DO UPDATE SET used=guest_usage.used+1 WHERE guest_usage.used<$2 RETURNING used`,[key,freeDaily]);
   return result.rowCount?{kind:'guest',key}:null;
 }
-async function refundUse(reservation){if(!reservation||!pool)return;if(reservation.kind==='member')await pool.query('UPDATE members SET credits=credits+1 WHERE id=$1',[reservation.id]);else await pool.query('UPDATE guest_usage SET used=GREATEST(0,used-1) WHERE day=current_date AND ip_hash=$1',[reservation.key]);}
+async function consumeCredit(req,res){await ensureDb();const reservation=await reserveUse(req);if(!reservation)return json(res,402,{error:'โควต้าฟรีวันนี้หมดแล้ว หรือเครดิตสมาชิกไม่พอ'});if(reservation.kind==='member'){const result=await pool.query('SELECT credits FROM members WHERE id=$1',[reservation.id]);return json(res,200,{kind:'member',remaining:Number(result.rows[0]?.credits||0)})}const result=await pool.query('SELECT used FROM guest_usage WHERE day=current_date AND ip_hash=$1',[reservation.key]);return json(res,200,{kind:'guest',remaining:Math.max(0,freeDaily-Number(result.rows[0]?.used||0))})}async function refundUse(reservation){if(!reservation||!pool)return;if(reservation.kind==='member')await pool.query('UPDATE members SET credits=credits+1 WHERE id=$1',[reservation.id]);else await pool.query('UPDATE guest_usage SET used=GREATEST(0,used-1) WHERE day=current_date AND ip_hash=$1',[reservation.key]);}
 async function account(req,res){await ensureDb();const member=await currentMember(req);if(!member)return json(res,200,{member:null,guestLimit:freeDaily});const ledger=await pool.query('SELECT delta,reason,created_at FROM credit_ledger WHERE member_id=$1 ORDER BY id DESC LIMIT 10',[member.id]);return json(res,200,{member,ledger:ledger.rows});}
 async function logout(req,res){if(pool){const token=cookie(req,'carrotos_session');if(token)await pool.query('DELETE FROM member_sessions WHERE token_hash=$1',[hash(token)]);}sessionCookie(res,'',0);return json(res,200,{ok:true});}
 async function stripeWebhook(req,res) {
@@ -206,12 +206,12 @@ http.createServer(async (req, res) => {
   if (req.method === 'POST' && url.pathname === '/api/checkout') { try { return await createCheckout(req,res); } catch(e) { return json(res,e.status||500,{error:e.message||'สร้างการชำระเงินไม่สำเร็จ'}); } }
   if (req.method === 'GET' && url.pathname === '/api/status') return json(res, 200, { configured: Boolean(API_KEY), model: MODEL, hosted: HOSTED });
   if (req.method === 'POST' && url.pathname === '/api/configure') return configure(req, res);
-  if (req.method === 'POST' && url.pathname === '/api/generate') return generate(req, res);
+  if (req.method === 'POST' && url.pathname === '/api/use-credit') { try { return await consumeCredit(req,res); } catch(e) { return json(res,e.status||500,{error:e.message||'เครดิตใช้งานไม่สำเร็จ'}); } }  if (req.method === 'POST' && url.pathname === '/api/generate') return generate(req, res);
   if (req.method === 'GET' && url.pathname === '/settings') {
     if (HOSTED) return json(res, 404, { error: 'ไม่พบหน้านี้' });
     return readFile(res, path.join(__dirname, 'settings.html'));
   }
-  if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
+  if (req.method === 'GET' && url.pathname === '/documents') return readFile(res, path.join(__dirname, 'document-studio-preview.html'));  if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
     return readFile(res, PAGE);
   }
   res.writeHead(404, {'content-type':'text/plain; charset=utf-8'}); res.end('Not found');
