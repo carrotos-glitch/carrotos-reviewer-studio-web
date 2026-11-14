@@ -12,5 +12,15 @@ services:
         value: gpt-6-luna
       - key: OPENAI_API_KEY
         sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: APP_SESSION_SECRET
+        generateValue: true
+      - key: APP_BASE_URL
+        value: https://carrotos-reviewer-studio.onrender.com
       - key: APP_ACCESS_CODE
         sync: false

@@ -27,6 +27,25 @@ const tabContents={shot:'<div class="result-head"><strong>🎥 ช็อตล�
 (() => {
   const byId = id => document.getElementById(id);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  let currentAccount = null;
+  const modal = document.createElement('div');
+  modal.id='memberModal'; modal.className='hidden'; modal.style.cssText='position:fixed;inset:0;background:#20152f88;z-index:30;display:grid;place-items:center;padding:16px';
+  modal.innerHTML=`<section style="background:white;border-radius:22px;padding:22px;width:min(440px,100%);max-height:90vh;overflow:auto;box-shadow:0 25px 80px #24133355"><div style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0">🥕 สมาชิก CarrotOS</h2><button id="closeMember" class="smallbtn">ปิด</button></div><div id="memberArea" style="margin-top:15px"></div></section>`;
+  document.body.append(modal);
+  const memberArea=modal.querySelector('#memberArea');
+  function memberView(){
+    if(currentAccount?.member){const m=currentAccount.member;memberArea.innerHTML=`<p>เข้าสู่ระบบเป็น <b>${esc(m.email)}</b></p><div style="background:#f3edfb;border-radius:14px;padding:14px;margin:12px 0">เครดิตคงเหลือ <strong style="font-size:24px;color:#684496">${Number(m.credits)||0}</strong> ครั้ง</div><h3>เติมเครดิตด้วย PromptPay</h3><div style="display:grid;gap:9px"><button class="smallbtn buyPack" data-pack="small">ซื้อ 20 ครั้ง · 10 บาท</button><button class="smallbtn buyPack" data-pack="large">ซื้อ 100 ครั้ง · 39 บาท</button></div><p style="font-size:12px;color:#82758e">เครดิตจะเพิ่มหลังระบบรับชำระเงินยืนยันยอดแล้ว</p><button id="logoutMember" class="smallbtn">ออกจากระบบ</button>`;
+      memberArea.querySelectorAll('.buyPack').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const r=await fetch('/api/checkout',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({pack:b.dataset.pack})}),d=await r.json();if(!r.ok)throw new Error(d.error||'เปิดหน้าชำระเงินไม่สำเร็จ');location.href=d.url;}catch(e){toast(e.message);b.disabled=false;}});
+      memberArea.querySelector('#logoutMember').onclick=async()=>{await fetch('/api/logout',{method:'POST'});currentAccount=null;modal.classList.add('hidden');updateQuota();setLoginLabel();};
+    } else {memberArea.innerHTML=`<p style="color:#776d83">สร้างบัญชีเพื่อเก็บเครดิตและซื้อเพิ่ม</p><form id="memberForm"><label class="field">อีเมล<input name="email" type="email" autocomplete="email" required style="width:100%;padding:10px;border:1px solid #d9c9e5;border-radius:10px"></label><label class="field">รหัสผ่าน (อย่างน้อย 10 ตัว)<input name="password" type="password" autocomplete="current-password" minlength="10" required style="width:100%;padding:10px;border:1px solid #d9c9e5;border-radius:10px"></label><div style="display:flex;gap:8px"><button class="smallbtn" type="submit" data-mode="login">เข้าสู่ระบบ</button><button class="smallbtn" type="submit" data-mode="register">สมัครสมาชิก</button></div><p id="memberError" style="color:#b33;margin-bottom:0"></p></form>`;
+      memberArea.querySelectorAll('button[type=submit]').forEach(button=>button.onclick=async event=>{event.preventDefault();const form=memberArea.querySelector('#memberForm');if(!form.reportValidity())return;const error=memberArea.querySelector('#memberError');button.disabled=true;error.textContent='กำลังดำเนินการ…';try{const r=await fetch(button.dataset.mode==='register'?'/api/register':'/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:form.email.value,password:form.password.value})}),d=await r.json();if(!r.ok)throw new Error(d.error||'ทำรายการไม่สำเร็จ');currentAccount={member:d.member,ledger:[]};memberView();updateQuota();setLoginLabel();}catch(e){error.textContent=e.message;button.disabled=false;}});
+    }
+  }
+  const setLoginLabel=()=>{const b=byId('loginBtn');if(b)b.textContent=currentAccount?.member?`👤 ${currentAccount.member.credits} เครดิต`:'👤 เข้าสู่ระบบ';};
+  byId('loginBtn').onclick=()=>{memberView();modal.classList.remove('hidden');};modal.querySelector('#closeMember').onclick=()=>modal.classList.add('hidden');modal.onclick=e=>{if(e.target===modal)modal.classList.add('hidden');};
+  async function refreshAccount(){try{const r=await fetch('/api/account');if(!r.ok)return;currentAccount=await r.json();setLoginLabel();updateQuota();}catch{}}
+  refreshAccount();
+  if(new URLSearchParams(location.search).get('payment')==='success'){toast('ได้รับการชำระเงินแล้ว กำลังตรวจสอบเครดิต');let n=0;const poll=setInterval(async()=>{await refreshAccount();if(currentAccount?.member||++n>12){clearInterval(poll);modal.classList.remove('hidden');memberView();}},3000);history.replaceState({},'',location.pathname);}
   let isPreview = true;
   let generated = {
     script:[
@@ -55,8 +74,9 @@ const tabContents={shot:'<div class="result-head"><strong>🎥 ช็อตล�
   quotaNotice.style.cssText = 'margin:-5px 0 13px;padding:10px 14px;border-radius:12px;background:#effbf0;color:#33854a;font-size:12px';
   document.querySelector('.hero').after(quotaNotice);
   const updateQuota = () => {
+    if(currentAccount?.member){quotaNotice.textContent=`👤 ${currentAccount.member.email} · เครดิตคงเหลือ ${currentAccount.member.credits} ครั้ง`;quotaNotice.style.background='#f3edfb';quotaNotice.style.color='#604288';setLoginLabel();return;}
     const left = Math.max(0, dailyLimit - readQuota());
-    quotaNotice.textContent = `ใช้ฟรี ไม่ต้องสมัคร · วันนี้เหลือ ${left}/${dailyLimit} ครั้ง`;
+    quotaNotice.textContent = `ใช้ฟรี ไม่ต้องสมัคร · วันนี้เหลือ ${left}/${dailyLimit} ครั้ง · สมัครสมาชิกเพื่อเก็บเครดิต`;
     quotaNotice.style.background = left ? '#effbf0' : '#fff1f0';
     quotaNotice.style.color = left ? '#33854a' : '#a33b35';
   };
@@ -97,7 +117,7 @@ const tabContents={shot:'<div class="result-head"><strong>🎥 ช็อตล�
   document.querySelectorAll('.tab').forEach(btn => btn.onclick = () => renderResult(btn.dataset.tab));
   renderResult('script');
   const generate = async () => {
-    if (readQuota() >= dailyLimit) { toast('วันนี้ใช้ครบ 25 ครั้งแล้ว กลับมาใหม่พรุ่งนี้นะ'); updateQuota(); return; }
+    if (!currentAccount?.member && readQuota() >= dailyLimit) { toast('วันนี้ใช้ครบ 25 ครั้งแล้ว สมัครสมาชิกเพื่อเติมเครดิตได้'); updateQuota(); return; }
     const button = byId('generate');
     button.disabled = true; button.textContent = '⏳ กำลังให้ AI สร้างคอนเทนต์…'; button.style.opacity = '.75';
     try {
@@ -108,7 +128,8 @@ const tabContents={shot:'<div class="result-head"><strong>🎥 ช็อตล�
       }) });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || `ส่งคำขอไม่สำเร็จ (${response.status})`);
-      localStorage.setItem(quotaKey, JSON.stringify({ day: quotaToday(), used: readQuota() + 1 }));
+      if(!currentAccount?.member)localStorage.setItem(quotaKey, JSON.stringify({ day: quotaToday(), used: readQuota() + 1 }));
+      else {currentAccount.member.credits=Math.max(0,Number(currentAccount.member.credits)-1);setLoginLabel();}
       generated = data.result; isPreview = false; renderResult(activeTab); toast('ได้คอนเทนต์จาก OpenAI แล้ว ✨');
       updateQuota();
     } catch (error) { toast(error.message || 'เชื่อมต่อ AI ไม่สำเร็จ'); }
