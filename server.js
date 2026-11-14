@@ -108,6 +108,11 @@ function readFile(res, file) {
   return fs.createReadStream(file).pipe(res);
 }
 
+function readScriptAsset(res, file) {
+  res.writeHead(200, { 'content-type': 'application/javascript; charset=utf-8', 'cache-control': 'public, max-age=86400' });
+  return fs.createReadStream(file).pipe(res);
+}
+
 function json(res, status, data) {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
   res.end(JSON.stringify(data));
@@ -211,6 +216,7 @@ http.createServer(async (req, res) => {
     if (HOSTED) return json(res, 404, { error: 'ไม่พบหน้านี้' });
     return readFile(res, path.join(__dirname, 'settings.html'));
   }
+  if (req.method === 'GET' && url.pathname === '/vendor/html2pdf.bundle.min.js') return readScriptAsset(res, path.join(__dirname, 'node_modules', 'html2pdf.js', 'dist', 'html2pdf.bundle.min.js'));
   if (req.method === 'GET' && url.pathname === '/documents') return readFile(res, path.join(__dirname, 'document-studio-preview.html'));  if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
     return readFile(res, PAGE);
   }

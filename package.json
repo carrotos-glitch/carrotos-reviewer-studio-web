@@ -4,6 +4,6 @@
   "private": true,
   "description": "Thai AI reviewer studio",
   "scripts": { "start": "node server.js" },
-  "dependencies": { "pg": "^8.13.1" },
+  "dependencies": { "pg": "^8.13.1", "html2pdf.js": "0.10.1" },
   "engines": { "node": ">=20" }
 }
