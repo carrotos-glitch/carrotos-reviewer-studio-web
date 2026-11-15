@@ -3,6 +3,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { Pool } = require('pg');
+const generatePromptPayPayload = require('promptpay-qr');
+const QRCode = require('qrcode');
 
 const PORT = Number(process.env.PORT || 4173);
 const HOSTED = process.env.NODE_ENV === 'production' || Boolean(process.env.RENDER);
@@ -23,7 +25,10 @@ async function ensureDb() {
     ALTER TABLE members ADD COLUMN IF NOT EXISTS google_sub TEXT UNIQUE;
     ALTER TABLE members ALTER COLUMN password_hash DROP NOT NULL;
     CREATE TABLE IF NOT EXISTS member_sessions (token_hash TEXT PRIMARY KEY, member_id BIGINT NOT NULL REFERENCES members(id) ON DELETE CASCADE, expires_at TIMESTAMPTZ NOT NULL);
-    CREATE TABLE IF NOT EXISTS credit_orders (id TEXT PRIMARY KEY, member_id BIGINT NOT NULL REFERENCES members(id), pack TEXT NOT NULL, credits INTEGER NOT NULL, amount INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending', checkout_id TEXT UNIQUE, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), paid_at TIMESTAMPTZ);
+    CREATE TABLE IF NOT EXISTS credit_orders (id TEXT PRIMARY KEY, member_id BIGINT NOT NULL REFERENCES members(id), pack TEXT NOT NULL, credits INTEGER NOT NULL, amount INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending', checkout_id TEXT UNIQUE, trans_ref TEXT UNIQUE, verification_json JSONB, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), paid_at TIMESTAMPTZ);
+    ALTER TABLE credit_orders ADD COLUMN IF NOT EXISTS trans_ref TEXT UNIQUE;
+    ALTER TABLE credit_orders ADD COLUMN IF NOT EXISTS verification_json JSONB;
+    CREATE TABLE IF NOT EXISTS member_daily_usage (member_id BIGINT NOT NULL REFERENCES members(id) ON DELETE CASCADE, day DATE NOT NULL, used INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(member_id,day));
     CREATE TABLE IF NOT EXISTS credit_ledger (id BIGSERIAL PRIMARY KEY, member_id BIGINT NOT NULL REFERENCES members(id), delta INTEGER NOT NULL, reason TEXT NOT NULL, reference TEXT UNIQUE, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
     CREATE TABLE IF NOT EXISTS guest_usage (day DATE NOT NULL, ip_hash TEXT NOT NULL, used INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(day, ip_hash));
     CREATE TABLE IF NOT EXISTS document_click_counts (action TEXT PRIMARY KEY, clicks BIGINT NOT NULL DEFAULT 0, updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
@@ -72,29 +77,154 @@ async function googleCallback(req,res){
   if(!result.rowCount){res.writeHead(302,{Location:'/?auth=google-failed'});return res.end();}
   const token=crypto.randomBytes(32).toString('base64url');await pool.query("INSERT INTO member_sessions(token_hash,member_id,expires_at) VALUES($1,$2,now()+interval '30 days')",[hash(token),result.rows[0].id]);sessionCookie(res,token,30*86400);res.writeHead(302,{Location:'/?login=google','Cache-Control':'no-store'});res.end();
 }
-async function createCheckout(req,res) {
-  await ensureDb(); const member=await currentMember(req); if(!member)return json(res,401,{error:'กรุณาเข้าสู่ระบบก่อนซื้อเครดิต'});
-  if(!process.env.STRIPE_SECRET_KEY)return json(res,503,{error:'ยังไม่ได้เปิดรับชำระเงินจริง กรุณาตั้งค่า Stripe ใน Render'});
-  const body=await readBody(req), pack=packs[body.pack]; if(!pack)return json(res,400,{error:'ไม่พบแพ็กเกจนี้'});
-  const id=crypto.randomUUID(); const origin=(process.env.APP_BASE_URL||'https://carrotos-reviewer-studio.onrender.com').replace(/\/$/,'');
-  const form=new URLSearchParams({mode:'payment',success_url:`${origin}/?payment=success`,cancel_url:`${origin}/?payment=cancelled`,customer_email:member.email,'line_items[0][price_data][currency]':'thb','line_items[0][price_data][unit_amount]':String(pack.amount),'line_items[0][price_data][product_data][name]':`CarrotOS ${pack.credits} เครดิต`,'line_items[0][quantity]':'1','payment_method_types[0]':'promptpay','metadata[order_id]':id,'metadata[member_id]':String(member.id)});
-  await pool.query('INSERT INTO credit_orders(id,member_id,pack,credits,amount) VALUES($1,$2,$3,$4,$5)',[id,member.id,body.pack,pack.credits,pack.amount]);
-  const upstream=await fetch('https://api.stripe.com/v1/checkout/sessions',{method:'POST',headers:{authorization:`Bearer ${process.env.STRIPE_SECRET_KEY}`,'content-type':'application/x-www-form-urlencoded'},body:form.toString()}); const data=await upstream.json().catch(()=>({}));
-  if(!upstream.ok||!data.url){await pool.query("UPDATE credit_orders SET status='failed' WHERE id=$1",[id]); return json(res,502,{error:'สร้างรายการชำระเงินไม่สำเร็จ กรุณาลองใหม่'});}
-  await pool.query('UPDATE credit_orders SET checkout_id=$2 WHERE id=$1',[id,data.id]); return json(res,200,{url:data.url});
+
+async function createPromptPayOrder(req,res) {
+  await ensureDb();
+  const member = await currentMember(req);
+  if (!member) return json(res,401,{error:'กรุณาเข้าสู่ระบบก่อนเติมเครดิต'});
+
+  const body = await readBody(req);
+  const pack = packs[body.pack];
+  if (!pack) return json(res,400,{error:'ไม่พบแพ็กเกจนี้'});
+
+  // ตั้งค่า PROMPTPAY_ID ใน Render เป็นเบอร์โทร 10 หลัก, เลขบัตร/เลขผู้เสียภาษี 13 หลัก หรือ e-Wallet ID 15 หลัก
+  const promptPayId = String(process.env.PROMPTPAY_ID || '').replace(/[^0-9]/g,'');
+  if (![10,13,15].includes(promptPayId.length)) {
+    return json(res,503,{error:'ผู้ดูแลต้องตั้งค่า PROMPTPAY_ID ใน Render ให้เป็นเบอร์ PromptPay 10 หลัก, เลข 13 หลัก หรือ e-Wallet ID 15 หลัก'});
+  }
+
+  const amountBaht = Number((pack.amount / 100).toFixed(2));
+  let qr;
+  try {
+    const payload = generatePromptPayPayload(promptPayId,{amount:amountBaht});
+    qr = await QRCode.toDataURL(payload,{errorCorrectionLevel:'M',margin:2,width:360});
+  } catch (error) {
+    console.error('PromptPay QR generation failed:',error);
+    return json(res,500,{error:'สร้าง PromptPay QR ไม่สำเร็จ กรุณาตรวจสอบ PROMPTPAY_ID'});
+  }
+
+  const id = crypto.randomUUID();
+  await pool.query(
+    "INSERT INTO credit_orders(id,member_id,pack,credits,amount,status) VALUES($1,$2,$3,$4,$5,'pending')",
+    [id,member.id,body.pack,pack.credits,pack.amount]
+  );
+
+  return json(res,200,{orderId:id,amount:amountBaht,credits:pack.credits,qr});
 }
+
+async function verifyPromptPaySlip(req,res) {
+  await ensureDb();
+  const member = await currentMember(req);
+  if (!member) return json(res,401,{error:'กรุณาเข้าสู่ระบบก่อนส่งสลิป'});
+  if (!process.env.EASYSLIP_API_KEY) return json(res,503,{error:'ผู้ดูแลยังไม่ได้ตั้งค่า EASYSLIP_API_KEY ใน Render'});
+
+  const body = await readBody(req);
+  const orderId = String(body.orderId || '');
+  const image = String(body.image || '');
+  const match = image.match(/^data:image\/(jpeg|png|webp|gif);base64,([A-Za-z0-9+/=]+)$/i);
+  if (!orderId || !match) return json(res,400,{error:'กรุณาเลือกไฟล์สลิป JPG, PNG, WEBP หรือ GIF'});
+
+  const bytes = Buffer.from(match[2],'base64');
+  if (!bytes.length || bytes.length > 4 * 1024 * 1024) return json(res,400,{error:'ไฟล์สลิปต้องมีขนาดไม่เกิน 4 MB'});
+
+  const found = await pool.query(
+    "SELECT * FROM credit_orders WHERE id=$1 AND member_id=$2",
+    [orderId,member.id]
+  );
+  if (!found.rowCount) return json(res,404,{error:'ไม่พบคำสั่งเติมเครดิตนี้'});
+  const order = found.rows[0];
+  if (order.status === 'paid') return json(res,409,{error:'คำสั่งซื้อนี้ได้รับเครดิตแล้ว หากเครดิตยังไม่แสดงให้รีเฟรชบัญชี'});
+  // สถานะเก่าที่ไม่ใช่ paid อนุญาตให้ตรวจใหม่ได้ เพื่อกู้รายการที่ค้างจากการตรวจครั้งก่อน
+
+  // EasySlip API v2 รองรับ base64 แบบ JSON และรับ Data URL prefix ได้
+  const easy = await fetch('https://api.easyslip.com/v2/verify/bank',{
+    method:'POST',
+    headers:{
+      authorization:`Bearer ${process.env.EASYSLIP_API_KEY}`,
+      'content-type':'application/json'
+    },
+    body:JSON.stringify({
+      base64:image,
+      remark:`CarrotOS order ${orderId}`,
+      matchAccount:true,
+      matchAmount:Number(order.amount) / 100,
+      checkDuplicate:false
+    }),
+    signal:AbortSignal.timeout(45000)
+  });
+
+  const result = await easy.json().catch(()=>({}));
+  if (!easy.ok || result.success !== true) {
+    const message = result?.error?.message || 'EasySlip ตรวจสอบสลิปไม่สำเร็จ';
+    return json(res,easy.status >= 500 ? 502 : 400,{error:message});
+  }
+
+  const data = result.data || {};
+  const raw = data.rawSlip || {};
+  const amount = Number(data.amountInSlip ?? raw.amount?.amount ?? data.amount?.amount ?? NaN);
+  const transRef = String(data.transRef || raw.transRef || '');
+  const matchedAccount = data.matchedAccount;
+  const amountMatched = data.isAmountMatched === true ||
+    (Number.isFinite(amount) && Math.round(amount * 100) === Number(order.amount));
+
+  // ใช้ trans_ref UNIQUE ในฐานข้อมูล CarrotOS เป็นตัวป้องกันสลิปซ้ำหลัก
+  if (!matchedAccount) return json(res,400,{error:'บัญชีผู้รับในสลิปไม่ตรงกับบัญชีที่ลงทะเบียนใน EasySlip'});
+  if (!amountMatched) return json(res,400,{error:`ยอดเงินในสลิปไม่ตรงกับยอด ${Number(order.amount)/100} บาท`});
+  if (!transRef) return json(res,400,{error:'EasySlip ไม่ส่งเลขอ้างอิงธุรกรรมกลับมา จึงยังไม่สามารถเพิ่มเครดิตได้'});
+
+  // ใช้ transaction + row lock เพื่อให้คำสั่งซื้อหนึ่งรายการเพิ่มเครดิตได้เพียงครั้งเดียว
+  const db = await pool.connect();
+  try {
+    await db.query('BEGIN');
+    const locked = await db.query(
+      "SELECT * FROM credit_orders WHERE id=$1 AND member_id=$2 FOR UPDATE",
+      [orderId,member.id]
+    );
+    if (!locked.rowCount || locked.rows[0].status === 'paid') {
+      await db.query('ROLLBACK');
+      return json(res,409,{error:'คำสั่งซื้อนี้ถูกดำเนินการไปแล้ว'});
+    }
+    // สถานะอื่นที่ยังไม่ paid สามารถตรวจซ้ำได้ โดย row lock ป้องกันการเติมซ้ำพร้อมกัน
+
+    const duplicate = await db.query('SELECT id FROM credit_orders WHERE trans_ref=$1',[transRef]);
+    if (duplicate.rowCount) {
+      await db.query('ROLLBACK');
+      return json(res,409,{error:'เลขอ้างอิงสลิปนี้ถูกใช้เติมเครดิตแล้ว'});
+    }
+
+    await db.query(
+      "UPDATE credit_orders SET status='paid',paid_at=now(),trans_ref=$2,verification_json=$3::jsonb WHERE id=$1",
+      [orderId,transRef,JSON.stringify(data)]
+    );
+    await db.query('UPDATE members SET credits=credits+$2 WHERE id=$1',[member.id,order.credits]);
+    await db.query(
+      'INSERT INTO credit_ledger(member_id,delta,reason,reference) VALUES($1,$2,$3,$4)',
+      [member.id,order.credits,`เติมเครดิตผ่าน PromptPay ${order.credits} เครดิต`,orderId]
+    );
+    await db.query('COMMIT');
+    return json(res,200,{ok:true,message:`ตรวจสอบสำเร็จ! เพิ่ม ${order.credits} เครดิตให้บัญชีแล้ว`,credits:order.credits});
+  } catch (error) {
+    await db.query('ROLLBACK');
+    if (error.code === '23505') return json(res,409,{error:'สลิปนี้หรือคำสั่งซื้อนี้ถูกใช้ไปแล้ว'});
+    throw error;
+  } finally {
+    db.release();
+  }
+}
+
 function clientIp(req){const forwarded=String(req.headers['x-forwarded-for']||'').split(',').map(value=>value.trim()).filter(Boolean);const cloudflare=String(req.headers['cf-connecting-ip']||'').trim();return (cloudflare||forwarded[0]||req.socket.remoteAddress||'unknown').slice(0,128)}
 const bangkokDay="(now() AT TIME ZONE 'Asia/Bangkok')::date";
 function usageKey(req){return hash((process.env.APP_SESSION_SECRET||process.env.DATABASE_URL||'carrotos')+':'+clientIp(req))}
 async function guestUsage(key){const result=await pool.query('SELECT used FROM guest_usage WHERE day='+bangkokDay+' AND ip_hash=$1',[key]);const used=Number(result.rows[0]?.used||0);return{used,remaining:Math.max(0,freeDaily-used)}}
 async function reserveUse(req) {
   const member=await currentMember(req);
-  if(member){const result=await pool.query('UPDATE members SET credits=credits-1 WHERE id=$1 AND credits>0 RETURNING id',[member.id]);return result.rowCount?{kind:'member',id:member.id}:null;}
+  if(member){const dayResult=await pool.query('INSERT INTO member_daily_usage(member_id,day,used) VALUES($1,'+bangkokDay+',1) ON CONFLICT(member_id,day) DO UPDATE SET used=member_daily_usage.used+1 WHERE member_daily_usage.used<$2 RETURNING used',[member.id,freeDaily]);if(dayResult.rowCount)return{kind:'member_free',id:member.id};const result=await pool.query('UPDATE members SET credits=credits-1 WHERE id=$1 AND credits>0 RETURNING id',[member.id]);return result.rowCount?{kind:'member_paid',id:member.id}:null;}
   const key=usageKey(req);
   const result=await pool.query('INSERT INTO guest_usage(day,ip_hash,used) VALUES('+bangkokDay+',$1,1) ON CONFLICT(day,ip_hash) DO UPDATE SET used=guest_usage.used+1 WHERE guest_usage.used<$2 RETURNING used',[key,freeDaily]);
   return result.rowCount?{kind:'guest',key}:null;
 }
-async function consumeCredit(req,res){await ensureDb();const reservation=await reserveUse(req);if(!reservation)return json(res,402,{error:'โควต้าฟรี 15 ครั้งต่อวันนี้ถูกใช้ครบแล้ว หรือเครดิตสมาชิกไม่พอ'});if(reservation.kind==='member'){const result=await pool.query('SELECT credits FROM members WHERE id=$1',[reservation.id]);return json(res,200,{kind:'member',remaining:Number(result.rows[0]?.credits||0)})}const usage=await guestUsage(reservation.key);return json(res,200,{kind:'guest',remaining:usage.remaining,used:usage.used})}async function refundUse(reservation){if(!reservation||!pool)return;if(reservation.kind==='member')await pool.query('UPDATE members SET credits=credits+1 WHERE id=$1',[reservation.id]);else await pool.query('UPDATE guest_usage SET used=GREATEST(0,used-1) WHERE day='+bangkokDay+' AND ip_hash=$1',[reservation.key]);}
+async function accountSnapshot(memberId){const r=await pool.query('SELECT credits FROM members WHERE id=$1',[memberId]);const d=await pool.query('SELECT used FROM member_daily_usage WHERE member_id=$1 AND day='+bangkokDay,[memberId]);return{dailyFreeRemaining:Math.max(0,freeDaily-Number(d.rows[0]?.used||0)),purchasedCredits:Number(r.rows[0]?.credits||0)};}
+async function consumeCredit(req,res){await ensureDb();const reservation=await reserveUse(req);if(!reservation)return json(res,402,{error:'โควต้าฟรี 15 ครั้งต่อวันนี้ถูกใช้ครบแล้ว หรือเครดิตสมาชิกไม่พอ'});if(reservation.kind==='member_free'){const a=await accountSnapshot(reservation.id);return json(res,200,{kind:'member',dailyFreeRemaining:a.dailyFreeRemaining,purchasedCredits:a.purchasedCredits})}if(reservation.kind==='member_paid'){const result=await pool.query('SELECT credits FROM members WHERE id=$1',[reservation.id]);const day=await pool.query('SELECT used FROM member_daily_usage WHERE member_id=$1 AND day='+bangkokDay,[reservation.id]);return json(res,200,{kind:'member',dailyFreeRemaining:Math.max(0,freeDaily-Number(day.rows[0]?.used||0)),purchasedCredits:Number(result.rows[0]?.credits||0)})}const usage=await guestUsage(reservation.key);return json(res,200,{kind:'guest',remaining:usage.remaining,used:usage.used})}async function refundUse(reservation){if(!reservation||!pool)return;if(reservation.kind==='member_paid')await pool.query('UPDATE members SET credits=credits+1 WHERE id=$1',[reservation.id]);else if(reservation.kind==='member_free')await pool.query('UPDATE member_daily_usage SET used=GREATEST(0,used-1) WHERE member_id=$1 AND day='+bangkokDay,[reservation.id]);else await pool.query('UPDATE guest_usage SET used=GREATEST(0,used-1) WHERE day='+bangkokDay+' AND ip_hash=$1',[reservation.key]);}
 const documentActions = new Set(['preview_pdf','create_pdf','save_pdf','save_draft']);
 async function trackDocumentClick(req,res){
   await ensureDb();
@@ -111,7 +241,7 @@ async function getDocumentClickStats(req,res){
   for(const row of result.rows) counts[row.action]=Number(row.clicks);
   return json(res,200,{counts,total:Object.values(counts).reduce((a,b)=>a+b,0)});
 }
-async function account(req,res){await ensureDb();const member=await currentMember(req);const usage=await guestUsage(usageKey(req));if(!member)return json(res,200,{member:null,guestLimit:freeDaily,guestUsed:usage.used,guestRemaining:usage.remaining});const ledger=await pool.query('SELECT delta,reason,created_at FROM credit_ledger WHERE member_id=$1 ORDER BY id DESC LIMIT 10',[member.id]);return json(res,200,{member,ledger:ledger.rows,guestLimit:freeDaily,guestUsed:usage.used,guestRemaining:usage.remaining});}
+async function account(req,res){await ensureDb();const member=await currentMember(req);const usage=await guestUsage(usageKey(req));if(!member)return json(res,200,{member:null,guestLimit:freeDaily,guestUsed:usage.used,guestRemaining:usage.remaining});const day=await pool.query('SELECT used FROM member_daily_usage WHERE member_id=$1 AND day='+bangkokDay,[member.id]);const dailyUsed=Number(day.rows[0]?.used||0);const ledger=await pool.query('SELECT delta,reason,created_at FROM credit_ledger WHERE member_id=$1 ORDER BY id DESC LIMIT 10',[member.id]);const orders=await pool.query('SELECT id,credits,amount,status,created_at FROM credit_orders WHERE member_id=$1 ORDER BY created_at DESC LIMIT 10',[member.id]);return json(res,200,{member,dailyFreeRemaining:Math.max(0,freeDaily-dailyUsed),purchasedCredits:Number(member.credits||0),dailyFreeUsed:dailyUsed,history:ledger.rows.map(x=>({feature:x.reason,wallet:'member_paid',created_at:x.created_at})),orders:orders.rows,ledger:ledger.rows,guestLimit:freeDaily,guestUsed:usage.used,guestRemaining:usage.remaining});}
 async function logout(req,res){if(pool){const token=cookie(req,'carrotos_session');if(token)await pool.query('DELETE FROM member_sessions WHERE token_hash=$1',[hash(token)]);}sessionCookie(res,'',0);return json(res,200,{ok:true});}
 async function stripeWebhook(req,res) {
   if(!pool||!process.env.STRIPE_WEBHOOK_SECRET)return json(res,503,{error:'Webhook ยังไม่ได้ตั้งค่า'});
@@ -192,7 +322,7 @@ async function generate(req, res) {
     }
     const outputText = data.output_text || data.output?.flatMap(item => item.content || []).find(part => part.type === 'output_text')?.text;
     if (!outputText) { await refundUse(reservation); reservation = null; return json(res, 502, { error: 'AI ไม่ได้ส่งข้อความกลับมา กรุณาลองใหม่' }); }
-    try { const result=JSON.parse(outputText); const member=pool?await currentMember(req):null; const usage=reservation?.kind==='guest'?await guestUsage(reservation.key):null; return json(res, 200, { result, model: data.model || MODEL, credits: member?.credits ?? null, guestRemaining: usage?.remaining ?? null }); }
+    try { const result=JSON.parse(outputText); const member=pool?await currentMember(req):null; const usage=reservation?.kind==='guest'?await guestUsage(reservation.key):null; const wallet=member?await accountSnapshot(member.id):null;return json(res, 200, { result, model: data.model || MODEL, credits: member?.credits ?? null, dailyFreeRemaining:wallet?.dailyFreeRemaining??null,purchasedCredits:wallet?.purchasedCredits??null,guestRemaining: usage?.remaining ?? null }); }
     catch { await refundUse(reservation); reservation=null; return json(res, 502, { error: 'รูปแบบคำตอบจาก AI ไม่ถูกต้อง กรุณาลองใหม่' }); }
   } catch (error) {
     await refundUse(reservation).catch(() => {});
@@ -225,12 +355,14 @@ http.createServer(async (req, res) => {
   if (req.method === 'GET' && url.pathname === '/auth/google') return googleStart(req,res);
   if (req.method === 'GET' && url.pathname === '/auth/google/callback') { try { return await googleCallback(req,res); } catch { res.writeHead(302,{Location:'/?auth=google-failed'}); return res.end(); } }
   if (req.method === 'POST' && url.pathname === '/api/stripe/webhook') return stripeWebhook(req,res);
-  if (req.method === 'GET' && url.pathname === '/api/account') { try { return await account(req,res); } catch(e) { return json(res,e.status||500,{error:e.message||'โหลดบัญชีไม่สำเร็จ'}); } }
   if (req.method === 'POST' && url.pathname === '/api/documents/track') { try { return await trackDocumentClick(req,res); } catch(e) { return json(res,e.status||500,{error:e.message||'บันทึกสถิติไม่สำเร็จ'}); } }
   if (req.method === 'GET' && url.pathname === '/api/documents/stats') { try { return await getDocumentClickStats(req,res); } catch(e) { return json(res,e.status||500,{error:e.message||'โหลดสถิติไม่สำเร็จ'}); } }
+  if (req.method === 'GET' && url.pathname === '/api/account') { try { return await account(req,res); } catch(e) { return json(res,e.status||500,{error:e.message||'โหลดบัญชีไม่สำเร็จ'}); } }
   if (req.method === 'POST' && url.pathname === '/api/register') { try { return await register(req,res); } catch(e) { return json(res,e.status||500,{error:e.code==='23505'?'อีเมลนี้มีบัญชีแล้ว':e.message||'สมัครสมาชิกไม่สำเร็จ'}); } }
   if (req.method === 'POST' && url.pathname === '/api/login') { try { return await login(req,res); } catch(e) { return json(res,e.status||500,{error:e.message||'เข้าสู่ระบบไม่สำเร็จ'}); } }
   if (req.method === 'POST' && url.pathname === '/api/logout') { try { return await logout(req,res); } catch(e) { return json(res,500,{error:'ออกจากระบบไม่สำเร็จ'}); } }
+  if (req.method === 'POST' && url.pathname === '/api/promptpay/order') { try { return await createPromptPayOrder(req,res); } catch(e) { return json(res,e.status||500,{error:e.message||'สร้าง QR ไม่สำเร็จ'}); } }
+  if (req.method === 'POST' && url.pathname === '/api/promptpay/slip') { try { return await verifyPromptPaySlip(req,res); } catch(e) { return json(res,e.status||500,{error:e.name==='TimeoutError'?'EasySlip ใช้เวลาตรวจสอบนานเกินไป กรุณาลองใหม่':e.message||'ตรวจสอบสลิปไม่สำเร็จ'}); } }
   if (req.method === 'POST' && url.pathname === '/api/checkout') { try { return await createCheckout(req,res); } catch(e) { return json(res,e.status||500,{error:e.message||'สร้างการชำระเงินไม่สำเร็จ'}); } }
   if (req.method === 'GET' && url.pathname === '/api/status') return json(res, 200, { configured: Boolean(API_KEY), model: MODEL, hosted: HOSTED });
   if (req.method === 'POST' && url.pathname === '/api/configure') return configure(req, res);
