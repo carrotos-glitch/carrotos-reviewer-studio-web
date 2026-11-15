@@ -82,7 +82,7 @@ async function createPromptPayOrder(req,res) {
   const body=await readBody(req), pack=packs[body.pack];
   if(!pack)return json(res,400,{error:'ไม่พบแพ็กเกจนี้'});
   const id=crypto.randomUUID();
-  const { generatePayload } = require('promptpay-qr');
+  const generatePayload = require('promptpay-qr');
   const QRCode = require('qrcode');
   const payload=generatePayload(process.env.PROMPTPAY_ID,{amount:pack.amount/100});
   const qr=await QRCode.toDataURL(payload,{errorCorrectionLevel:'M',margin:2,width:420});
