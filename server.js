@@ -115,10 +115,10 @@ async function verifyPromptPaySlip(req,res) {
       body:JSON.stringify({base64:image,checkDuplicate:true,matchAccount:true,matchAmount:order.amount/100,remark:`CarrotOS:${orderId}`}),signal:AbortSignal.timeout(45000)
     });
     const result=await response.json().catch(()=>({}));
-    if(!response.ok||result.success!==true){await pool.query("UPDATE credit_orders SET status='pending' WHERE id=$1 AND status='verifying'",[orderId]);return json(res,422,{error:result?.error?.message||'EasySlip ตรวจสอบสลิปไม่สำเร็จ กรุณาตรวจสอบภาพแล้วลองใหม่'});}
+    if(!response.ok||result.success!==true){await pool.query("UPDATE credit_orders SET status='pending' WHERE id=$1 AND status='verifying'",[orderId]);return json(res,422,{error:[result?.error?.code,result?.error?.message].filter(Boolean).join(': ')||'EasySlip ตรวจสอบสลิปไม่สำเร็จ กรุณาตรวจสอบภาพแล้วลองใหม่'});}
     const data=result.data||{}, raw=data.rawSlip||{}, amount=Number(data.amountInSlip??raw.amount?.amount??data.amount?.amount??0), transRef=String(raw.transRef||data.transRef||'');
     if(data.isDuplicate===true){await pool.query("UPDATE credit_orders SET status='rejected' WHERE id=$1 AND status='verifying'",[orderId]);return json(res,409,{error:'สลิปนี้ถูกใช้ไปแล้ว ไม่สามารถเติมเครดิตซ้ำได้'});}
-    if(!transRef||Math.round(amount*100)!==Number(order.amount)||data.isAmountMatched===false||!data.matchedAccount){await pool.query("UPDATE credit_orders SET status='rejected' WHERE id=$1 AND status='verifying'",[orderId]);return json(res,422,{error:'ยอดเงินหรือบัญชีผู้รับไม่ตรงกับรายการ กรุณาตรวจสอบก่อนส่งใหม่'});}
+    if(!data.matchedAccount){await pool.query("UPDATE credit_orders SET status='pending' WHERE id=$1 AND status='verifying'",[orderId]);return json(res,422,{code:'RECEIVER_NOT_MATCHED',error:'EasySlip ยังไม่พบบัญชีผู้รับที่เชื่อมไว้ กรุณาเพิ่มบัญชี PromptPay ผู้รับใน EasySlip แล้วเลือกรูปสลิปอีกครั้ง'});}if(!transRef||Math.round(amount*100)!==Number(order.amount)||data.isAmountMatched===false){await pool.query("UPDATE credit_orders SET status='pending' WHERE id=$1 AND status='verifying'",[orderId]);return json(res,422,{code:'PAYMENT_MISMATCH',error:`ยอดเงินหรือข้อมูลอ้างอิงไม่ตรง แพ็กเกจนี้ต้องจ่าย ${order.amount/100} บาท ระบบยังไม่เพิ่มเครดิต`});}/* mismatch handled above */
     const creditClient=await pool.connect();
     try{
       await creditClient.query('BEGIN');
