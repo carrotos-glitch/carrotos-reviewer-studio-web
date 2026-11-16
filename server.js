@@ -186,7 +186,7 @@ async function verifyPromptPaySlip(req,res) {
     }
     // สถานะอื่นที่ยังไม่ paid สามารถตรวจซ้ำได้ โดย row lock ป้องกันการเติมซ้ำพร้อมกัน
 
-    const duplicate = await db.query('SELECT id FROM credit_orders WHERE trans_ref=$1',[transRef]);
+    const duplicate = await db.query('SELECT id FROM credit_orders WHERE trans_ref=$1 AND id<>$2',[transRef,orderId]);
     if (duplicate.rowCount) {
       await db.query('ROLLBACK');
       return json(res,409,{error:'เลขอ้างอิงสลิปนี้ถูกใช้เติมเครดิตแล้ว'});
@@ -196,9 +196,9 @@ async function verifyPromptPaySlip(req,res) {
       "UPDATE credit_orders SET status='paid',paid_at=now(),trans_ref=$2,verification_json=$3::jsonb WHERE id=$1",
       [orderId,transRef,JSON.stringify(data)]
     );
-    await db.query('UPDATE members SET credits=credits+$2 WHERE id=$1',[member.id,order.credits]);
+    // credits are incremented only by a newly inserted ledger entry
     await db.query(
-      'INSERT INTO credit_ledger(member_id,delta,reason,reference) VALUES($1,$2,$3,$4)',
+      'WITH new_entry AS (INSERT INTO credit_ledger(member_id,delta,reason,reference) VALUES($1,$2,$3,$4) ON CONFLICT(reference) DO NOTHING RETURNING member_id,delta) UPDATE members SET credits=members.credits+new_entry.delta FROM new_entry WHERE members.id=new_entry.member_id',
       [member.id,order.credits,`เติมเครดิตผ่าน PromptPay ${order.credits} เครดิต`,orderId]
     );
     await db.query('COMMIT');
