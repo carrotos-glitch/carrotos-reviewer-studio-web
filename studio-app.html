@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CarrotOS Reviewer Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#302445;--muted:#837c91;--purple:#563a78;--lav:#f2ebff;--line:#eadcf5;--orange:#ff8c24;--paper:#fffaf4;--green:#2f9e44;--red:#d6336c}
+*{box-sizing:border-box}
+body{margin:0;color:var(--ink);font-family:Kanit,system-ui,sans-serif;background:var(--paper)}
+header{position:sticky;top:0;z-index:5;background:#fffaf4ee;backdrop-filter:blur(6px);border-bottom:1px solid var(--line);padding:10px 14px}
+.brand{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.brand b{font-size:17px;color:var(--purple)}
+.brand span{font-size:12px;color:var(--muted)}
+nav{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px}
+nav a{flex:0 0 auto;display:flex;align-items:center;gap:6px;padding:9px 12px;border-radius:13px;text-decoration:none;color:#685e79;font-size:14px;white-space:nowrap}
+nav a.active{background:linear-gradient(100deg,#ff9e2c,#ff781d);color:#fff;font-weight:500}
+main{max-width:860px;margin:0 auto;padding:16px 14px 60px}
+h1{font-size:22px;margin:4px 0 4px;color:var(--purple)}
+.sub{color:var(--muted);font-size:14px;margin:0 0 14px}
+.card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.grow{flex:1;min-width:0}
+.t{margin:0;font-weight:500;font-size:15px}
+.s{margin:2px 0 0;color:var(--muted);font-size:13px}
+button,.btn{font-family:inherit;font-size:14px;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:10px;padding:9px 12px;cursor:pointer;min-height:40px}
+button.primary{background:var(--orange);border-color:var(--orange);color:#3a1d00;font-weight:500}
+button.danger{color:var(--red)}
+button:disabled{opacity:.55;cursor:default}
+input,select,textarea{font-family:inherit;font-size:15px;width:100%;padding:10px;border:1px solid #d9c9e5;border-radius:10px;background:#fff;color:var(--ink)}
+textarea{min-height:130px;resize:vertical}
+label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+.chip{display:inline-block;font-size:12px;background:#fff1de;color:#8a4b00;border-radius:8px;padding:2px 8px}
+.msg{padding:10px 12px;border-radius:10px;font-size:14px;margin:10px 0}
+.msg.err{background:#ffe8ef;color:#9c1d4a}
+.msg.ok{background:#e6f7ea;color:#1f6f35}
+.metrics{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.metric{background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px}
+.metric b{display:block;font-size:22px;color:var(--purple)}
+.metric span{font-size:13px;color:var(--muted)}
+.out{white-space:pre-wrap;line-height:1.7;font-size:15px;background:var(--lav);border-radius:12px;padding:12px;margin-top:10px}
+.cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;text-align:center}
+.cal .h{font-size:12px;color:var(--muted);padding:4px 0}
+.cal .d{min-height:46px;border:1px solid var(--line);border-radius:10px;padding:4px;font-size:13px;background:#fff;cursor:pointer;position:relative}
+.cal .d.has{background:#fff1de;border-color:#ffd9a8}
+.cal .d.today{outline:2px solid var(--orange)}
+.cal .d.sel{background:var(--orange);color:#3a1d00}
+.cal .d i{display:block;font-style:normal;font-size:11px;margin-top:2px}
+.work-body{margin-top:10px;border-top:1px solid var(--line);padding-top:10px;font-size:14px;line-height:1.7}
+.work-body h4{margin:10px 0 4px;color:var(--purple);font-size:14px}
+.empty{text-align:center;color:var(--muted);padding:26px 10px}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span style="font-size:24px">🥕</span><div><b>CarrotOS Reviewer Studio</b><br><span>รีวิวดี มีสไตล์ ให้ AI ช่วยคิด</span></div></div>
+  <nav id="nav"></nav>
+</header>
+<main id="app"><div class="empty">กำลังโหลด…</div></main>
+<script>
+(function () {
+  'use strict';
+  var NAV = [['/', '🏠', 'หน้าหลัก'], ['/', '🎬', 'สร้างรีวิว AI'], ['/documents', '📄', 'คลังเอกสาร'], ['/works', '📁', 'คลังงานของฉัน'], ['/templates', '📚', 'เทมเพลต'], ['/tools', '🤖', 'AI Tools'], ['/calendar', '🗓️', 'ปฏิทินงาน'], ['/stats', '📈', 'สถิติ & รายได้'], ['/account', '⚙️', 'ตั้งค่า']];
+  var PAGE = { '/works': 'works', '/templates': 'templates', '/tools': 'tools', '/calendar': 'calendar', '/stats': 'stats', '/account': 'account' }[location.pathname] || 'works';
+  var app = document.getElementById('app');
+
+  function h(tag, attrs) {
+    var el = document.createElement(tag);
+    if (attrs) Object.keys(attrs).forEach(function (k) {
+      if (k === 'class') el.className = attrs[k];
+      else if (k.slice(0, 2) === 'on') el.addEventListener(k.slice(2), attrs[k]);
+      else if (attrs[k] !== null && attrs[k] !== undefined && attrs[k] !== false) el.setAttribute(k, attrs[k]);
+    });
+    for (var i = 2; i < arguments.length; i++) {
+      var c = arguments[i];
+      if (c === null || c === undefined || c === false) continue;
+      if (Array.isArray(c)) { c.forEach(function (x) { el.appendChild(x); }); continue; }
+      el.appendChild(typeof c === 'string' || typeof c === 'number' ? document.createTextNode(String(c)) : c);
+    }
+    return el;
+  }
+  function api(path, body) {
+    var opt = body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
+    return fetch(path, opt).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (d) {
+        if (!r.ok) { var e = new Error(d.error || 'เกิดข้อผิดพลาด (' + r.status + ')'); e.status = r.status; throw e; }
+        return d;
+      });
+    });
+  }
+  function msg(kind, text) { return h('div', { class: 'msg ' + kind }, text); }
+  function baht(satang) { return (satang / 100).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function show() { app.replaceChildren.apply(app, arguments); }
+  function copy(text, btn) {
+    (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(function () {
+      var old = btn.textContent; btn.textContent = 'คัดลอกแล้ว'; setTimeout(function () { btn.textContent = old; }, 1400);
+    }).catch(function () { alert('เบราว์เซอร์ไม่อนุญาตให้คัดลอก'); });
+  }
+  function todayStr() { var d = new Date(Date.now() + 7 * 3600000); return d.toISOString().slice(0, 10); }
+
+  var nav = document.getElementById('nav');
+  NAV.forEach(function (n) {
+    var active = n[0] === location.pathname && n[2] !== 'หน้าหลัก';
+    nav.appendChild(h('a', { href: n[0], class: active ? 'active' : '' }, h('span', null, n[1]), h('span', null, n[2])));
+  });
+
+  function needLogin() {
+    show(h('h1', null, 'กรุณาเข้าสู่ระบบ'), h('p', { class: 'sub' }, 'หน้านี้ใช้ได้เฉพาะสมาชิก เพื่อเก็บงานของคุณไว้ในบัญชี'), h('a', { href: '/', class: 'btn primary', style: 'display:inline-block;text-decoration:none;padding:10px 16px;background:#ff8c24;border-radius:10px;color:#3a1d00' }, 'ไปหน้าหลักเพื่อเข้าสู่ระบบ'));
+  }
+  function fail(e) {
+    if (e && e.status === 401) return needLogin();
+    show(msg('err', (e && e.message) || 'โหลดไม่สำเร็จ'));
+  }
+
+  function workText(w) {
+    var r = w.result || {}, out = [w.title, ''];
+    (r.script || []).forEach(function (s) { out.push(s.time + ' ' + s.title, 'บทพูด: ' + s.line, 'TEXT: ' + (s.screen_text || ''), ''); });
+    if (r.caption) out.push('แคปชั่น: ' + r.caption);
+    if (r.hashtags) out.push((r.hashtags || []).join(' '));
+    return out.join('\n');
+  }
+
+  /* ---------- คลังงานของฉัน ---------- */
+  function worksPage() {
+    var list = h('div'), search = h('input', { type: 'text', placeholder: 'ค้นหาชื่อร้านหรือสินค้า', 'aria-label': 'ค้นหา' }), all = [];
+    function render() {
+      var q = search.value.trim().toLowerCase();
+      var items = all.filter(function (w) { return !q || (w.title || '').toLowerCase().indexOf(q) > -1; });
+      list.replaceChildren();
+      if (!items.length) { list.appendChild(h('div', { class: 'empty' }, all.length ? 'ไม่พบงานที่ค้นหา' : 'ยังไม่มีงานที่บันทึก สร้างรีวิวที่หน้า "สร้างรีวิว AI" แล้วงานจะถูกบันทึกให้อัตโนมัติ')); return; }
+      items.forEach(function (w) {
+        var body = h('div', { class: 'work-body', style: 'display:none' }), opened = false;
+        var openBtn = h('button', { onclick: function () {
+          if (!opened) {
+            opened = true; body.textContent = 'กำลังโหลด…';
+            api('/api/studio/works?id=' + w.id).then(function (d) {
+              var r = d.work.result || {}; body.replaceChildren();
+              body.appendChild(h('h4', null, 'สคริปต์'));
+              (r.script || []).forEach(function (s) { body.appendChild(h('p', { style: 'margin:6px 0' }, h('b', null, s.time + ' · ' + s.title), h('br'), s.line, h('br'), h('span', { class: 's' }, 'ข้อความบนจอ: ' + (s.screen_text || '')))); });
+              if ((r.shot_list || []).length) { body.appendChild(h('h4', null, 'ช็อตลิสต์')); r.shot_list.forEach(function (s) { body.appendChild(h('p', { style: 'margin:4px 0' }, s.time + ' · ' + s.description)); }); }
+              if (r.caption) { body.appendChild(h('h4', null, 'แคปชั่น')); body.appendChild(h('p', null, r.caption)); }
+              if ((r.hashtags || []).length) { body.appendChild(h('h4', null, 'แฮชแท็ก')); body.appendChild(h('p', null, r.hashtags.join(' '))); }
+              if (r.cover_idea) { body.appendChild(h('h4', null, 'ไอเดียภาพปก')); body.appendChild(h('p', null, r.cover_idea)); }
+              w._full = d.work;
+            }).catch(function (e) { body.replaceChildren(msg('err', e.message)); opened = false; });
+          }
+          body.style.display = body.style.display === 'none' ? 'block' : 'none';
+        } }, 'เปิดดู');
+        var copyBtn = h('button', { onclick: function () {
+          var go = function (full) { copy(workText(full), copyBtn); };
+          if (w._full) return go(w._full);
+          api('/api/studio/works?id=' + w.id).then(function (d) { w._full = d.work; go(d.work); }).catch(function (e) { alert(e.message); });
+        } }, 'คัดลอก');
+        var calBtn = h('button', { onclick: function () {
+          var date = prompt('ลงวันที่ (ปปปป-ดด-วว)', todayStr());
+          if (!date) return;
+          api('/api/studio/calendar', { title: w.title, date: date, workId: w.id, platform: 'TikTok' }).then(function () { alert('เพิ่มในปฏิทินแล้ว'); }).catch(function (e) { alert(e.message); });
+        } }, 'ลงปฏิทิน');
+        var del = h('button', { class: 'danger', onclick: function () {
+          if (!confirm('ลบงานนี้ถาวร?')) return;
+          api('/api/studio/works/delete', { id: w.id }).then(function () { all = all.filter(function (x) { return x.id !== w.id; }); render(); }).catch(function (e) { alert(e.message); });
+        } }, 'ลบ');
+        list.appendChild(h('div', { class: 'card' }, h('div', { class: 'row' }, h('div', { class: 'grow' }, h('p', { class: 't' }, w.title), h('p', { class: 's' }, [w.category, w.tone, new Date(w.created_at).toLocaleDateString('th-TH')].filter(Boolean).join(' · '))), openBtn, copyBtn, calBtn, del), body));
+      });
+    }
+    search.addEventListener('input', render);
+    show(h('h1', null, '📁 คลังงานของฉัน'), h('p', { class: 'sub' }, 'งานที่สร้างจะถูกบันทึกให้อัตโนมัติ เก็บล่าสุดได้ 300 งาน'), search, h('div', { style: 'height:10px' }), list);
+    api('/api/studio/works').then(function (d) { all = d.works || []; render(); }).catch(fail);
+  }
+
+  /* ---------- เทมเพลต ---------- */
+  function templatesPage() {
+    var grid = h('div', { class: 'grid' });
+    show(h('h1', null, '📚 เทมเพลต'), h('p', { class: 'sub' }, 'เลือกแล้วระบบเติมประเภทรีวิว ความยาว และสไตล์ในหน้าสร้างรีวิวให้ ไม่เสียเครดิต'), grid);
+    api('/api/studio/templates').then(function (d) {
+      d.templates.forEach(function (t) {
+        grid.appendChild(h('div', { class: 'card' }, h('div', { style: 'font-size:28px' }, t.icon), h('p', { class: 't' }, t.name), h('p', { class: 's' }, t.desc), h('p', { style: 'margin:8px 0' }, h('span', { class: 'chip' }, t.duration)), h('button', { class: 'primary', style: 'width:100%', onclick: function () { location.href = '/?template=' + encodeURIComponent(t.id); } }, 'ใช้เทมเพลตนี้')));
+      });
+    }).catch(fail);
+  }
+
+  /* ---------- AI Tools ---------- */
+  function toolsPage() {
+    var defs = [['caption', '#️⃣', 'แคปชั่นและแฮชแท็ก', 'ได้ 5 แคปชั่นพร้อมแฮชแท็ก', 'วางรายละเอียดร้านหรือสินค้า เช่น ชื่อ จุดเด่น ราคา'], ['titles', '💡', 'คิดชื่อคลิป 10 แบบ', 'ชื่อที่ดึงคนกดดู', 'วางรายละเอียดคลิปหรือสินค้า'], ['shorten', '✂️', 'ย่อบทให้สั้นลง', 'ได้เวอร์ชันพูดจบใน 30 วินาที', 'วางสคริปต์ที่ต้องการย่อ'], ['english', '🌐', 'แปลบทเป็นภาษาอังกฤษ', 'รักษาน้ำเสียงเดิม', 'วางสคริปต์ภาษาไทยที่ต้องการแปล']];
+    var cur = defs[0], ta = h('textarea', { maxlength: '3000' }), out = h('div'), run = h('button', { class: 'primary' }, 'ให้ AI ทำเลย'), info = h('p', { class: 's' }, 'ใช้โควตาฟรีรายวันก่อน หมดแล้วตัด 1 เครดิตต่อครั้ง ถ้า AI ไม่ตอบจะไม่หักเครดิต');
+    var tabs = h('div', { class: 'grid' }), titleEl = h('p', { class: 't' }), hint = h('p', { class: 's' });
+    function pick(d) { cur = d; ta.placeholder = d[4]; titleEl.textContent = d[1] + ' ' + d[2]; hint.textContent = d[3]; out.replaceChildren(); Array.prototype.forEach.call(tabs.children, function (c, i) { c.style.borderColor = defs[i] === d ? '#ff8c24' : ''; }); }
+    defs.forEach(function (d) { tabs.appendChild(h('button', { class: 'card', style: 'text-align:left;margin:0', onclick: function () { pick(d); } }, h('div', { style: 'font-size:22px' }, d[1]), h('p', { class: 't' }, d[2]), h('p', { class: 's' }, d[3]), h('span', { class: 'chip' }, '1 เครดิต'))); });
+    run.addEventListener('click', function () {
+      var text = ta.value.trim(); out.replaceChildren();
+      if (text.length < 5) { out.appendChild(msg('err', 'กรุณาใส่ข้อความอย่างน้อย 5 ตัวอักษร')); return; }
+      run.disabled = true; run.textContent = '⏳ กำลังให้ AI ทำงาน…';
+      api('/api/studio/tools', { tool: cur[0], text: text }).then(function (d) {
+        var cp = h('button', { style: 'margin-top:8px', onclick: function () { copy(d.output, cp); } }, 'คัดลอกผลลัพธ์');
+        out.appendChild(h('div', { class: 'out' }, d.output)); out.appendChild(cp);
+        out.appendChild(h('p', { class: 's' }, 'โควตาฟรีวันนี้เหลือ ' + d.dailyFreeRemaining + ' · เครดิตซื้อเหลือ ' + d.purchasedCredits));
+      }).catch(function (e) { if (e.status === 401) return needLogin(); out.appendChild(msg('err', e.message)); }).then(function () { run.disabled = false; run.textContent = 'ให้ AI ทำเลย'; });
+    });
+    show(h('h1', null, '🤖 AI Tools'), h('p', { class: 'sub' }, 'เครื่องมือช่วยคิดแคปชั่น ชื่อคลิป ย่อและแปลบท'), tabs, h('div', { class: 'card', style: 'margin-top:12px' }, titleEl, hint, h('label', null, 'ข้อความของคุณ'), ta, h('div', { style: 'height:10px' }), run, info, out));
+    pick(defs[0]);
+  }
+
+  /* ---------- ปฏิทินงาน ---------- */
+  function calendarPage() {
+    var now = new Date(Date.now() + 7 * 3600000), year = now.getUTCFullYear(), month = now.getUTCMonth(), sel = todayStr(), items = [], works = [];
+    var title = h('div', { class: 'row' }), grid = h('div', { class: 'cal' }), listEl = h('div'), form = h('div', { class: 'card' });
+    var fTitle = h('input', { type: 'text', maxlength: '160', placeholder: 'ชื่องาน เช่น คลิปร้านชาบู' }), fDate = h('input', { type: 'date' }), fTime = h('input', { type: 'time' });
+    var fPlat = h('select', null, ['TikTok', 'Instagram Reels', 'YouTube Shorts', 'Facebook', 'อื่น ๆ'].map(function (p) { return h('option', { value: p }, p); }));
+    var fWork = h('select', null, h('option', { value: '' }, 'ไม่ผูกกับงานในคลัง'));
+    var err = h('div');
+    function key() { return year + '-' + String(month + 1).padStart(2, '0'); }
+    function load() {
+      api('/api/studio/calendar?month=' + key()).then(function (d) { items = d.items || []; draw(); }).catch(fail);
+    }
+    function draw() {
+      title.replaceChildren(h('button', { onclick: function () { month--; if (month < 0) { month = 11; year--; } load(); } }, '‹'), h('b', { class: 'grow', style: 'text-align:center' }, new Date(Date.UTC(year, month, 1)).toLocaleDateString('th-TH', { month: 'long', year: 'numeric', timeZone: 'UTC' })), h('button', { onclick: function () { month++; if (month > 11) { month = 0; year++; } load(); } }, '›'));
+      grid.replaceChildren();
+      ['จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส', 'อา'].forEach(function (d) { grid.appendChild(h('div', { class: 'h' }, d)); });
+      var first = (new Date(Date.UTC(year, month, 1)).getUTCDay() + 6) % 7, days = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+      for (var i = 0; i < first; i++) grid.appendChild(h('div'));
+      var tod = todayStr();
+      for (var d = 1; d <= days; d++) {
+        (function (day) {
+          var ds = key() + '-' + String(day).padStart(2, '0'), n = items.filter(function (x) { return x.date === ds; }).length;
+          grid.appendChild(h('button', { class: 'd' + (n ? ' has' : '') + (ds === tod ? ' today' : '') + (ds === sel ? ' sel' : ''), onclick: function () { sel = ds; fDate.value = ds; draw(); } }, String(day), n ? h('i', null, n + ' งาน') : null));
+        })(d);
+      }
+      listEl.replaceChildren(h('h3', { style: 'margin:14px 0 6px;color:#563a78' }, 'งานวันที่ ' + sel));
+      var day = items.filter(function (x) { return x.date === sel; });
+      if (!day.length) listEl.appendChild(h('div', { class: 'empty' }, 'ยังไม่มีงานในวันนี้'));
+      day.forEach(function (it) {
+        listEl.appendChild(h('div', { class: 'card' }, h('div', { class: 'row' }, h('input', { type: 'checkbox', style: 'width:22px;height:22px', checked: it.done ? 'checked' : null, 'aria-label': 'เสร็จแล้ว', onchange: function (e) { api('/api/studio/calendar/update', { id: it.id, done: e.target.checked }).then(load).catch(function (er) { alert(er.message); }); } }), h('div', { class: 'grow' }, h('p', { class: 't', style: it.done ? 'text-decoration:line-through;color:#837c91' : '' }, it.title), h('p', { class: 's' }, [it.platform, it.time].filter(Boolean).join(' · '))), h('button', { class: 'danger', onclick: function () { if (confirm('ลบรายการนี้?')) api('/api/studio/calendar/delete', { id: it.id }).then(load).catch(function (er) { alert(er.message); }); } }, 'ลบ'))));
+      });
+    }
+    function add() {
+      err.replaceChildren();
+      api('/api/studio/calendar', { title: fTitle.value, date: fDate.value, time: fTime.value, platform: fPlat.value, workId: fWork.value || null }).then(function () {
+        fTitle.value = ''; sel = fDate.value; var p = sel.split('-'); year = Number(p[0]); month = Number(p[1]) - 1; load();
+      }).catch(function (e) { err.appendChild(msg('err', e.message)); });
+    }
+    fDate.value = sel;
+    form.append(h('b', null, 'เพิ่มงานในปฏิทิน'), h('label', null, 'ชื่องาน'), fTitle, h('label', null, 'วันที่'), fDate, h('label', null, 'เวลา (ไม่บังคับ)'), fTime, h('label', null, 'แพลตฟอร์ม'), fPlat, h('label', null, 'ผูกกับงานในคลัง'), fWork, h('div', { style: 'height:10px' }), h('button', { class: 'primary', onclick: add }, 'เพิ่ม'), err);
+    show(h('h1', null, '🗓️ ปฏิทินงาน'), h('p', { class: 'sub' }, 'วางแผนวันลงคลิป แตะวันที่เพื่อดูงานของวันนั้น'), h('div', { class: 'card' }, title, h('div', { style: 'height:8px' }), grid), listEl, form);
+    api('/api/studio/works').then(function (d) { works = d.works || []; works.forEach(function (w) { fWork.appendChild(h('option', { value: w.id }, w.title)); }); }).catch(function () {});
+    load();
+  }
+
+  /* ---------- สถิติและรายได้ ---------- */
+  function statsPage() {
+    var box = h('div'), fAmt = h('input', { type: 'number', min: '0', step: '0.01', inputmode: 'decimal', placeholder: 'จำนวนเงิน (บาท)' }), fNote = h('input', { type: 'text', maxlength: '200', placeholder: 'หมายเหตุ เช่น ค่ารีวิวร้านชาบู' }), fDate = h('input', { type: 'date' }), err = h('div');
+    fDate.value = todayStr();
+    function load() {
+      api('/api/studio/stats').then(function (d) {
+        box.replaceChildren(
+          h('div', { class: 'metrics' },
+            h('div', { class: 'metric' }, h('b', null, d.works.month), h('span', null, 'งานที่สร้างเดือนนี้')),
+            h('div', { class: 'metric' }, h('b', null, d.works.total), h('span', null, 'งานทั้งหมดในคลัง')),
+            h('div', { class: 'metric' }, h('b', null, baht(d.income.monthSatang)), h('span', null, 'รายได้เดือนนี้ (บาท)')),
+            h('div', { class: 'metric' }, h('b', null, baht(d.income.totalSatang)), h('span', null, 'รายได้ทั้งหมด (บาท)')),
+            h('div', { class: 'metric' }, h('b', null, d.calendar.upcoming), h('span', null, 'งานที่ยังไม่ลง')),
+            h('div', { class: 'metric' }, h('b', null, d.calendar.done), h('span', null, 'งานที่ลงแล้ว'))),
+          h('h3', { style: 'margin:16px 0 6px;color:#563a78' }, 'รายการรายได้ล่าสุด'));
+        if (!d.entries.length) box.appendChild(h('div', { class: 'empty' }, 'ยังไม่มีรายการรายได้'));
+        d.entries.forEach(function (e) { box.appendChild(h('div', { class: 'card' }, h('div', { class: 'row' }, h('div', { class: 'grow' }, h('p', { class: 't' }, baht(e.amountSatang) + ' บาท'), h('p', { class: 's' }, e.date + (e.note ? ' · ' + e.note : ''))), h('button', { class: 'danger', onclick: function () { if (confirm('ลบรายการนี้?')) api('/api/studio/income/delete', { id: e.id }).then(load).catch(function (er) { alert(er.message); }); } }, 'ลบ')))); });
+      }).catch(fail);
+    }
+    function add() {
+      err.replaceChildren();
+      api('/api/studio/income', { amount: Number(fAmt.value), note: fNote.value, date: fDate.value }).then(function () { fAmt.value = ''; fNote.value = ''; load(); }).catch(function (e) { err.appendChild(msg('err', e.message)); });
+    }
+    show(h('h1', null, '📈 สถิติและรายได้'), h('p', { class: 'sub' }, 'รายได้ในหน้านี้เป็นรายการที่คุณบันทึกเอง ใช้ติดตามรายได้จากงานรีวิว'), box, h('div', { class: 'card' }, h('b', null, 'บันทึกรายได้'), h('label', null, 'จำนวนเงิน (บาท)'), fAmt, h('label', null, 'หมายเหตุ'), fNote, h('label', null, 'วันที่'), fDate, h('div', { style: 'height:10px' }), h('button', { class: 'primary', onclick: add }, 'บันทึก'), err));
+    load();
+  }
+
+  /* ---------- ตั้งค่า / บัญชี ---------- */
+  function accountPage() {
+    api('/api/account').then(function (d) {
+      if (!d.member) return needLogin();
+      var logout = h('button', { class: 'danger', onclick: function () { api('/api/logout', {}).then(function () { location.href = '/'; }).catch(function (e) { alert(e.message); }); } }, 'ออกจากระบบ');
+      var orders = (d.orders || []).map(function (o) { return h('div', { class: 'row', style: 'padding:6px 0;border-top:1px solid #eadcf5' }, h('div', { class: 'grow' }, h('p', { class: 't' }, o.credits + ' เครดิต · ' + baht(o.amount) + ' บาท'), h('p', { class: 's' }, new Date(o.created_at).toLocaleString('th-TH'))), h('span', { class: 'chip' }, o.status === 'paid' ? 'ชำระแล้ว' : 'รอชำระ')); });
+      var ledger = (d.ledger || []).map(function (l) { return h('div', { class: 'row', style: 'padding:6px 0;border-top:1px solid #eadcf5' }, h('div', { class: 'grow' }, h('p', { class: 't' }, l.reason), h('p', { class: 's' }, new Date(l.created_at).toLocaleString('th-TH'))), h('b', null, (l.delta > 0 ? '+' : '') + l.delta)); });
+      show(h('h1', null, '⚙️ ตั้งค่าบัญชี'),
+        h('div', { class: 'card' }, h('p', { class: 's' }, 'อีเมล'), h('p', { class: 't' }, d.member.email), h('div', { style: 'height:10px' }), logout),
+        h('div', { class: 'metrics' }, h('div', { class: 'metric' }, h('b', null, d.dailyFreeRemaining), h('span', null, 'โควตาฟรีวันนี้เหลือ')), h('div', { class: 'metric' }, h('b', null, d.purchasedCredits), h('span', null, 'เครดิตที่ซื้อเหลือ'))),
+        h('h3', { style: 'margin:16px 0 6px;color:#563a78' }, 'คำสั่งซื้อล่าสุด'), orders.length ? h('div', { class: 'card' }, orders) : h('div', { class: 'empty' }, 'ยังไม่มีคำสั่งซื้อ'),
+        h('h3', { style: 'margin:16px 0 6px;color:#563a78' }, 'ประวัติเครดิต'), ledger.length ? h('div', { class: 'card' }, ledger) : h('div', { class: 'empty' }, 'ยังไม่มีประวัติ'),
+        h('p', { class: 's' }, 'เติมเครดิตได้ที่ปุ่มสมาชิกมุมขวาบนของหน้าหลัก'));
+    }).catch(fail);
+  }
+
+  ({ works: worksPage, templates: templatesPage, tools: toolsPage, calendar: calendarPage, stats: statsPage, account: accountPage })[PAGE]();
+})();
+</script>
+</body>
+</html>
