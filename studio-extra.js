@@ -132,7 +132,7 @@ async function api(req, res, url, ctx) {
   if (m === 'GET' && p === '/calendar') {
     const month = String(url.searchParams.get('month') || '');
     if (!/^\d{4}-\d{2}$/.test(month)) return ctx.json(res, 400, { error: 'เดือนไม่ถูกต้อง' });
-    const r = await q("SELECT id,work_id,title,platform,to_char(scheduled_on,'YYYY-MM-DD') AS date,scheduled_time AS time,done FROM calendar_items WHERE member_id=$1 AND scheduled_on>=($2||'-01')::date AND scheduled_on<(($2||'-01')::date + interval '1 month') ORDER BY scheduled_on,scheduled_time", [member.id, month]);
+    const r = await q("SELECT id,work_id,title,platform,to_char(scheduled_on,'YYYY-MM-DD') AS date,scheduled_time AS time,done FROM calendar_items WHERE member_id=$1 AND scheduled_on>=($2::text||'-01')::date AND scheduled_on<(($2::text||'-01')::date + interval '1 month') ORDER BY scheduled_on,scheduled_time", [member.id, month]);
     return ctx.json(res, 200, { items: r.rows });
   }
   if (m === 'POST' && p === '/calendar') {
