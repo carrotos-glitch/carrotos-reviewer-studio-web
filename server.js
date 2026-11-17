@@ -370,6 +370,7 @@ async function configure(req, res) {
 
 http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  try { if (await require('./studio-extra')(req, res, url, { dir: __dirname, pool, ensureDb, currentMember, json, readBody, reserveUse, refundUse, accountSnapshot, MODEL, get apiKey() { return API_KEY; } })) return; } catch (error) { console.error('studio-extra failed:', error.message); }
   if (req.method === 'GET' && url.pathname === '/auth/google') return googleStart(req,res);
   if (req.method === 'GET' && url.pathname === '/auth/google/callback') { try { return await googleCallback(req,res); } catch { res.writeHead(302,{Location:'/?auth=google-failed'}); return res.end(); } }
   if (req.method === 'POST' && url.pathname === '/api/stripe/webhook') return stripeWebhook(req,res);
