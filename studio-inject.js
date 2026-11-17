@@ -4,20 +4,44 @@
   window.__studioInject = true;
 
   var routes = [['หน้าหลัก', '/'], ['สร้างรีวิว', '/'], ['คลังเอกสาร', '/documents'], ['คลังงานของฉัน', '/works'], ['เทมเพลต', '/templates'], ['AI Tools', '/tools'], ['ปฏิทินงาน', '/calendar'], ['สถิติ', '/stats'], ['ตั้งค่า', '/account']];
+  function go(url) { (window.__studioGo || function (u) { location.href = u; })(url); }
+
+  function isNavButton(b) {
+    if (!b || b.tagName !== 'BUTTON') return false;
+    if (b.classList.contains('nav')) return true;
+    var p = b.parentElement;
+    return !!(p && p.tagName === 'NAV' && p.classList.contains('nav'));
+  }
+
   document.addEventListener('click', function (e) {
-    var n = e.target && e.target.closest ? e.target.closest('.nav') : null;
-    if (!n) return;
-    var text = n.textContent || '';
+    var b = e.target && e.target.closest ? e.target.closest('button') : null;
+    if (!isNavButton(b)) return;
+    var text = b.textContent || '';
     for (var i = 0; i < routes.length; i++) {
       if (text.indexOf(routes[i][0]) > -1) {
         if (location.pathname === routes[i][1]) return;
         e.stopImmediatePropagation();
         e.preventDefault();
-        location.href = routes[i][1];
+        go(routes[i][1]);
         return;
       }
     }
   }, true);
+
+  var topNav = document.querySelector('nav.nav');
+  if (topNav) {
+    var btns = topNav.querySelectorAll('button'), hasWorks = false, after = null;
+    for (var k = 0; k < btns.length; k++) {
+      var label = btns[k].textContent || '';
+      if (label.indexOf('คลังงานของฉัน') > -1) hasWorks = true;
+      if (label.indexOf('คลังเอกสาร') > -1) after = btns[k];
+    }
+    if (!hasWorks && after) {
+      var added = document.createElement('button');
+      added.textContent = '📁 คลังงานของฉัน';
+      after.insertAdjacentElement('afterend', added);
+    }
+  }
 
   function note(message) {
     var d = document.createElement('div');
