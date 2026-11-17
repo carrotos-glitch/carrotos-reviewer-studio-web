@@ -112,6 +112,24 @@ async function createPromptPayOrder(req,res) {
   return json(res,200,{orderId:id,amount:amountBaht,credits:pack.credits,qr});
 }
 
+// สำรองเมื่อ matchAccount ของ EasySlip ไม่ผ่าน: พร้อมเพย์ชนิด NATID + หลักที่เห็นตรงกับ PROMPTPAY_ID (>=4 หลัก) + ชื่อผู้รับมี RECEIVER_NAME
+function receiverOk(receiver) {
+  try {
+    const id = String(process.env.PROMPTPAY_ID || '').replace(/\D/g, '');
+    const nm = process.env.RECEIVER_NAME;
+    if (!nm || id.length !== 13) return false;
+    const p = receiver?.account?.proxy;
+    if (p?.type !== 'NATID') return false;
+    const a = String(p.account || '').replace(/[^0-9Xx*]/g, '');
+    if (a.length !== 13) return false;
+    let visible = 0;
+    for (let i = 0; i < 13; i++) { if (/\d/.test(a[i])) { visible++; if (a[i] !== id[i]) return false; } }
+    if (visible < 4) return false;
+    const name = (receiver.account?.name?.th || '') + ' ' + (receiver.account?.name?.en || '');
+    return name.includes(nm);
+  } catch { return false; }
+}
+
 async function verifyPromptPaySlip(req,res) {
   await ensureDb();
   const member = await currentMember(req);
@@ -168,7 +186,7 @@ async function verifyPromptPaySlip(req,res) {
     (Number.isFinite(amount) && Math.round(amount * 100) === Number(order.amount));
 
   // ใช้ trans_ref UNIQUE ในฐานข้อมูล CarrotOS เป็นตัวป้องกันสลิปซ้ำหลัก
-  if (!matchedAccount) return json(res,400,{error:'บัญชีผู้รับในสลิปไม่ตรงกับบัญชีที่ลงทะเบียนใน EasySlip'});
+  if (!matchedAccount && !receiverOk(raw.receiver)) return json(res,400,{error:'บัญชีผู้รับในสลิปไม่ตรงกับบัญชีที่ลงทะเบียนใน EasySlip'});
   if (!amountMatched) return json(res,400,{error:`ยอดเงินในสลิปไม่ตรงกับยอด ${Number(order.amount)/100} บาท`});
   if (!transRef) return json(res,400,{error:'EasySlip ไม่ส่งเลขอ้างอิงธุรกรรมกลับมา จึงยังไม่สามารถเพิ่มเครดิตได้'});
 
