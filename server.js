@@ -252,6 +252,20 @@ async function trackDocumentClick(req,res){
   const result=await pool.query(`INSERT INTO document_click_counts(action,clicks,updated_at) VALUES($1,1,now()) ON CONFLICT(action) DO UPDATE SET clicks=document_click_counts.clicks+1,updated_at=now() RETURNING action,clicks`,[action]);
   return json(res,200,{ok:true,action,clicks:Number(result.rows[0].clicks)});
 }
+async function ownerStatsRoute(req,res,url){
+  const token=String(process.env.STATS_TOKEN||'');
+  const given=String(req.headers['x-stats-token']||'');
+  const ok=token.length>=16&&given.length===token.length&&crypto.timingSafeEqual(Buffer.from(given),Buffer.from(token));
+  if(!ok)return json(res,401,{error:'unauthorized'});
+  const re=/^\d{4}-\d{2}-\d{2}$/;
+  const from=url.searchParams.get('from')||'',to=url.searchParams.get('to')||'';
+  if(!re.test(from)||!re.test(to))return json(res,400,{error:'bad range'});
+  await ensureDb();
+  const m=await pool.query('SELECT COALESCE(SUM(used),0) n, COUNT(DISTINCT member_id) u FROM member_daily_usage WHERE day BETWEEN $1 AND $2',[from,to]);
+  const g=await pool.query('SELECT COALESCE(SUM(used),0) n, COUNT(DISTINCT ip_hash) u FROM guest_usage WHERE day BETWEEN $1 AND $2',[from,to]);
+  const s=await pool.query("SELECT COUNT(*) c, COALESCE(SUM(amount),0) s FROM credit_orders WHERE status='paid' AND (paid_at AT TIME ZONE 'Asia/Bangkok')::date BETWEEN $1 AND $2",[from,to]);
+  return json(res,200,{uses:Number(m.rows[0].n)+Number(g.rows[0].n),users:Number(m.rows[0].u)+Number(g.rows[0].u),members:Number(m.rows[0].u),orders:Number(s.rows[0].c),satang:Number(s.rows[0].s)});
+}
 async function getDocumentClickStats(req,res){
   await ensureDb();
   const result=await pool.query('SELECT action,clicks FROM document_click_counts ORDER BY action');
@@ -375,6 +389,7 @@ http.createServer(async (req, res) => {
   if (req.method === 'GET' && url.pathname === '/auth/google/callback') { try { return await googleCallback(req,res); } catch { res.writeHead(302,{Location:'/?auth=google-failed'}); return res.end(); } }
   if (req.method === 'POST' && url.pathname === '/api/stripe/webhook') return stripeWebhook(req,res);
   if (req.method === 'POST' && url.pathname === '/api/documents/track') { try { return await trackDocumentClick(req,res); } catch(e) { return json(res,e.status||500,{error:e.message||'บันทึกสถิติไม่สำเร็จ'}); } }
+  if (req.method === 'GET' && url.pathname === '/api/owner/stats') { try { return await ownerStatsRoute(req,res,url); } catch(e) { return json(res,e.status||500,{error:'stats error'}); } }
   if (req.method === 'GET' && url.pathname === '/api/documents/stats') { try { return await getDocumentClickStats(req,res); } catch(e) { return json(res,e.status||500,{error:e.message||'โหลดสถิติไม่สำเร็จ'}); } }
   if (req.method === 'GET' && url.pathname === '/api/account') { try { return await account(req,res); } catch(e) { return json(res,e.status||500,{error:e.message||'โหลดบัญชีไม่สำเร็จ'}); } }
   if (req.method === 'POST' && url.pathname === '/api/register') { try { return await register(req,res); } catch(e) { return json(res,e.status||500,{error:e.code==='23505'?'อีเมลนี้มีบัญชีแล้ว':e.message||'สมัครสมาชิกไม่สำเร็จ'}); } }
